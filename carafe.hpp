@@ -200,7 +200,7 @@ private:
     inline static bool case_insensitive_equals(const char *a, const char *b) {
         size_t i;
         for(i = 0; a[i] != '\0' || b[i] != '\0'; i++) {
-            if (a[i] != b[i]) return false;
+            if ((a[i] & 0x7F) != (b[i] & 0x7F)) return false;
         }
         return a[i] == b[i];
     }
@@ -273,16 +273,10 @@ public:
 class CarafeHTTPD {
 private:
     friend CarafeRequestConnectionValues;
-    MHD_FLAG flags;
     uint_fast16_t listen_port;
-    unsigned int timeout;
-    bool dual_stack;
-    bool debug;
     struct MHD_Daemon *daemon;
     struct MHD_Daemon *daemon6;
     std::vector<CarafeRouteCallbackInfo> routes;
-    CarafeAccessLogCallback access_log_callback;
-    CarafeErrorLogCallback error_log_callback;
 
     static int mhd_handler(void *microhttpd_ptr,
                                 struct MHD_Connection *connection,
@@ -438,21 +432,24 @@ private:
 
 public:
     size_t max_upload_size;
-    bool keep_running;
+    volatile bool keep_running;
+    CarafeAccessLogCallback access_log_callback;
+    CarafeErrorLogCallback error_log_callback;
+    unsigned int timeout, thread_pool_size;
+    bool dual_stack;
+    bool debug;
 
-    CarafeHTTPD(MHD_FLAG f, uint_fast16_t p) :
-        flags(f),
+    CarafeHTTPD(uint_fast16_t p) :
         listen_port(p),
-        timeout(60),
-        dual_stack(true),
-        debug(false),
         daemon(nullptr),
         daemon6(nullptr),
         max_upload_size(10*1024*1024), // 10 megs, arbitrary
-        keep_running(true)
+        keep_running(true),
+        timeout(60),
+        thread_pool_size(1),
+        dual_stack(true),
+        debug(false)
     {};
-
-    CarafeHTTPD(uint_fast16_t port) : CarafeHTTPD(MHD_USE_SELECT_INTERNALLY, port) {};
 
     ~CarafeHTTPD() noexcept {
         MHD_stop_daemon(daemon);
@@ -461,25 +458,42 @@ public:
 
     inline void run() {
         sort_routes();
-        if (dual_stack && (flags & MHD_USE_DUAL_STACK)) throw std::logic_error("Can't use both dual stack types");
+
+        struct MHD_OptionItem ops[] = {
+            { MHD_OPTION_CONNECTION_TIMEOUT, timeout, NULL },
+            { MHD_OPTION_LISTENING_ADDRESS_REUSE, 1, NULL },
+            { MHD_OPTION_END, 0, NULL }, // used for MHD_OPTION_THREAD_POOL_SIZE
+            { MHD_OPTION_END, 0, NULL }
+        };
+
+        // libmicrohttpd logs a message if we set this to 1 (the default), so
+        // don't set it unless we're going to set it to > 1.
+        if (thread_pool_size > 1) {
+            ops[2] = { MHD_OPTION_THREAD_POOL_SIZE, thread_pool_size, NULL };
+        }
+
+        MHD_FLAG flags = MHD_USE_SELECT_INTERNALLY;
+        if (debug) flags = flags | MHD_USE_DEBUG;
+
         daemon = MHD_start_daemon(flags,
                                   listen_port,
                                   NULL,
                                   NULL,
                                   mhd_handler,
                                   static_cast<void *>(this),
-                                  MHD_OPTION_CONNECTION_TIMEOUT, timeout,
+                                  MHD_OPTION_ARRAY, ops,
                                   MHD_OPTION_END);
         if (!daemon) throw std::runtime_error("MHD_start_daemon");
 
         if (dual_stack) {
-            daemon6 = MHD_start_daemon(flags | MHD_USE_IPv6,
+            flags = flags | MHD_USE_IPv6;
+            daemon6 = MHD_start_daemon(flags,
                                        listen_port,
                                        NULL,
                                        NULL,
                                        mhd_handler,
                                        static_cast<void *>(this),
-                                       MHD_OPTION_CONNECTION_TIMEOUT, timeout,
+                                       MHD_OPTION_ARRAY, ops,
                                        MHD_OPTION_END);
             if (!daemon6) throw std::runtime_error("MHD_start_daemon");
         }
@@ -495,21 +509,6 @@ public:
         }
     }
 
-    inline void set_timeout(unsigned int seconds) { timeout = seconds; }
-    inline void set_dual_stack(bool enable) { dual_stack = enable; }
-
-    inline void set_debug(bool enable) {
-        debug = enable;
-        if (enable) {
-            flags = flags | MHD_USE_DEBUG;
-        } else {
-            flags = flags & ~MHD_USE_DEBUG;
-        }
-    }
-
-    inline void set_access_log_func(CarafeAccessLogCallback l) { access_log_callback = l; }
-    inline void set_error_log_func(CarafeErrorLogCallback l) { error_log_callback = l; }
-
     static inline std::string generate_access_log(CarafeRequest &request, CarafeResponse &response, const char *method) {
         std::array<char, 27> date_buf;
         std::time_t t = std::time(nullptr);
@@ -518,9 +517,9 @@ public:
             request.client_ip() +
             " - - [" +
             date_buf.data() +
-            "] " +
+            "] \"" +
             method +
-            " \"" +
+            ' ' +
             request.path +
             ' ' +
             request.version +
@@ -596,6 +595,5 @@ inline void CarafeRequestConnectionValues::load_all() {
     }
     all_args_populated = true;
 }
-
 
 #endif /* carafe_hpp */

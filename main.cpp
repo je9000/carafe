@@ -22,20 +22,24 @@ void post(CarafeRequest &request, CarafeResponse &response) {
 }
 
 int main(int argc, char **argv) {
-    CarafeHTTPD httpd(3389);
-    httpd.set_debug(true);
+    long port = 8080;
+    if (argc > 1) port = strtol(argv[1], NULL, 10);
+
+    CarafeHTTPD httpd(port);
+    httpd.debug = true;
     httpd.add_route("/hello", CarafeHTTPMethods::GET | CarafeHTTPMethods::HEAD, test);
     httpd.add_route("/var/<var>", CarafeHTTPMethods::GET, var);
     httpd.add_route("/post", CarafeHTTPMethods::POST, post);
 
-    httpd.set_access_log_func([](CarafeRequest &request, CarafeResponse &response, const char *method) {
+    httpd.access_log_callback= [](CarafeRequest &request, CarafeResponse &response, const char *method) {
         std::cout << CarafeHTTPD::generate_access_log(request, response, method) << "\n";
-    });
+    };
 
-    httpd.set_error_log_func([](CarafeRequest &request, const char *method, const std::exception e) {
+    httpd.error_log_callback = [](CarafeRequest &request, const char *method, const std::exception e) {
         std::cerr << "Exception: " << e.what() << "\n";
-    });
+    };
 
+    std::clog << "Listening on " << port << "\n";
     httpd.run_forever();
     return 0;
 }
