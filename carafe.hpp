@@ -44,7 +44,8 @@ enum CarafeHTTPMethods {
     CONNECT = 1 << 5,
     OPTIONS = 1 << 6,
     TRACE = 1 << 7,
-    PATCH = 1 << 8
+    PATCH = 1 << 8,
+    PURGE = 1 << 9
 };
 
 typedef unsigned long CarafeHTTPMethod;
@@ -251,6 +252,8 @@ public:
             return CarafeHTTPMethods::GET;
         } else if (case_insensitive_equals(method, "POST")) {
             return CarafeHTTPMethods::POST;
+        } else if (case_insensitive_equals(method, "PURGE")) {
+            return CarafeHTTPMethods::PURGE;
         } else if (case_insensitive_equals(method, "PUT")) {
             return CarafeHTTPMethods::PUT;
         } else if (case_insensitive_equals(method, "DELETE")) {
