@@ -10,6 +10,7 @@
 #include <regex>
 #include <array>
 #include <chrono>
+#include <random>
 
 #include <stdlib.h>
 #include <string.h>
@@ -17,20 +18,537 @@
 
 #include <microhttpd.h>
 
-// TODO logging
+// Begin public domain SHA512 implementation
+// Thanks https://github.com/kalven/sha-2
+struct sha512_state
+{
+    std::uint64_t length;
+    std::uint64_t state[8];
+    std::uint32_t curlen;
+    unsigned char buf[128];
+};
+
+typedef std::uint32_t u32;
+typedef std::uint64_t u64;
+
+static const u64 K[80] =
+{
+    0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL, 0xb5c0fbcfec4d3b2fULL, 0xe9b5dba58189dbbcULL, 0x3956c25bf348b538ULL,
+    0x59f111f1b605d019ULL, 0x923f82a4af194f9bULL, 0xab1c5ed5da6d8118ULL, 0xd807aa98a3030242ULL, 0x12835b0145706fbeULL,
+    0x243185be4ee4b28cULL, 0x550c7dc3d5ffb4e2ULL, 0x72be5d74f27b896fULL, 0x80deb1fe3b1696b1ULL, 0x9bdc06a725c71235ULL,
+    0xc19bf174cf692694ULL, 0xe49b69c19ef14ad2ULL, 0xefbe4786384f25e3ULL, 0x0fc19dc68b8cd5b5ULL, 0x240ca1cc77ac9c65ULL,
+    0x2de92c6f592b0275ULL, 0x4a7484aa6ea6e483ULL, 0x5cb0a9dcbd41fbd4ULL, 0x76f988da831153b5ULL, 0x983e5152ee66dfabULL,
+    0xa831c66d2db43210ULL, 0xb00327c898fb213fULL, 0xbf597fc7beef0ee4ULL, 0xc6e00bf33da88fc2ULL, 0xd5a79147930aa725ULL,
+    0x06ca6351e003826fULL, 0x142929670a0e6e70ULL, 0x27b70a8546d22ffcULL, 0x2e1b21385c26c926ULL, 0x4d2c6dfc5ac42aedULL,
+    0x53380d139d95b3dfULL, 0x650a73548baf63deULL, 0x766a0abb3c77b2a8ULL, 0x81c2c92e47edaee6ULL, 0x92722c851482353bULL,
+    0xa2bfe8a14cf10364ULL, 0xa81a664bbc423001ULL, 0xc24b8b70d0f89791ULL, 0xc76c51a30654be30ULL, 0xd192e819d6ef5218ULL,
+    0xd69906245565a910ULL, 0xf40e35855771202aULL, 0x106aa07032bbd1b8ULL, 0x19a4c116b8d2d0c8ULL, 0x1e376c085141ab53ULL,
+    0x2748774cdf8eeb99ULL, 0x34b0bcb5e19b48a8ULL, 0x391c0cb3c5c95a63ULL, 0x4ed8aa4ae3418acbULL, 0x5b9cca4f7763e373ULL,
+    0x682e6ff3d6b2b8a3ULL, 0x748f82ee5defb2fcULL, 0x78a5636f43172f60ULL, 0x84c87814a1f0ab72ULL, 0x8cc702081a6439ecULL,
+    0x90befffa23631e28ULL, 0xa4506cebde82bde9ULL, 0xbef9a3f7b2c67915ULL, 0xc67178f2e372532bULL, 0xca273eceea26619cULL,
+    0xd186b8c721c0c207ULL, 0xeada7dd6cde0eb1eULL, 0xf57d4f7fee6ed178ULL, 0x06f067aa72176fbaULL, 0x0a637dc5a2c898a6ULL,
+    0x113f9804bef90daeULL, 0x1b710b35131c471bULL, 0x28db77f523047d84ULL, 0x32caab7b40c72493ULL, 0x3c9ebe0a15c9bebcULL,
+    0x431d67c49c100d4cULL, 0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
+};
+
+static u32 min(u32 x, u32 y)
+{
+    return x < y ? x : y;
+}
+
+static void store64(u64 x, unsigned char* y)
+{
+    for(int i = 0; i != 8; ++i)
+        y[i] = (x >> ((7-i) * 8)) & 255;
+}
+
+static u64 load64(const unsigned char* y)
+{
+    u64 res = 0;
+    for(int i = 0; i != 8; ++i)
+        res |= u64(y[i]) << ((7-i) * 8);
+    return res;
+}
+
+static u64 Ch(u64 x, u64 y, u64 z)  { return z ^ (x & (y ^ z)); }
+static u64 Maj(u64 x, u64 y, u64 z) { return ((x | y) & z) | (x & y); }
+static u64 Rot(u64 x, u64 n)        { return (x >> (n & 63)) | (x << (64 - (n & 63))); }
+static u64 Sh(u64 x, u64 n)         { return x >> n; }
+static u64 Sigma0(u64 x)            { return Rot(x, 28) ^ Rot(x, 34) ^ Rot(x, 39); }
+static u64 Sigma1(u64 x)            { return Rot(x, 14) ^ Rot(x, 18) ^ Rot(x, 41); }
+static u64 Gamma0(u64 x)            { return Rot(x, 1) ^ Rot(x, 8) ^ Sh(x, 7); }
+static u64 Gamma1(u64 x)            { return Rot(x, 19) ^ Rot(x, 61) ^ Sh(x, 6); }
+
+static void sha_compress(sha512_state& md, const unsigned char *buf)
+{
+    u64 S[8], W[80], t0, t1;
+
+    // Copy state into S
+    for(int i = 0; i < 8; i++)
+        S[i] = md.state[i];
+
+    // Copy the state into 1024-bits into W[0..15]
+    for(int i = 0; i < 16; i++)
+        W[i] = load64(buf + (8*i));
+
+    // Fill W[16..79]
+    for(int i = 16; i < 80; i++)
+        W[i] = Gamma1(W[i - 2]) + W[i - 7] + Gamma0(W[i - 15]) + W[i - 16];
+
+    // Compress
+    auto RND = [&](u64 a, u64 b, u64 c, u64& d, u64 e, u64 f, u64 g, u64& h, u64 i)
+    {
+        t0 = h + Sigma1(e) + Ch(e, f, g) + K[i] + W[i];
+        t1 = Sigma0(a) + Maj(a, b, c);
+        d += t0;
+        h  = t0 + t1;
+    };
+
+    for(int i = 0; i < 80; i += 8)
+    {
+        RND(S[0],S[1],S[2],S[3],S[4],S[5],S[6],S[7],i+0);
+        RND(S[7],S[0],S[1],S[2],S[3],S[4],S[5],S[6],i+1);
+        RND(S[6],S[7],S[0],S[1],S[2],S[3],S[4],S[5],i+2);
+        RND(S[5],S[6],S[7],S[0],S[1],S[2],S[3],S[4],i+3);
+        RND(S[4],S[5],S[6],S[7],S[0],S[1],S[2],S[3],i+4);
+        RND(S[3],S[4],S[5],S[6],S[7],S[0],S[1],S[2],i+5);
+        RND(S[2],S[3],S[4],S[5],S[6],S[7],S[0],S[1],i+6);
+        RND(S[1],S[2],S[3],S[4],S[5],S[6],S[7],S[0],i+7);
+    }
+
+    // Feedback
+    for(int i = 0; i < 8; i++)
+        md.state[i] = md.state[i] + S[i];
+}
+
+// Public interface
+
+static void sha_init(sha512_state& md)
+{
+    md.curlen = 0;
+    md.length = 0;
+    md.state[0] = 0x6a09e667f3bcc908ULL;
+    md.state[1] = 0xbb67ae8584caa73bULL;
+    md.state[2] = 0x3c6ef372fe94f82bULL;
+    md.state[3] = 0xa54ff53a5f1d36f1ULL;
+    md.state[4] = 0x510e527fade682d1ULL;
+    md.state[5] = 0x9b05688c2b3e6c1fULL;
+    md.state[6] = 0x1f83d9abfb41bd6bULL;
+    md.state[7] = 0x5be0cd19137e2179ULL;
+}
+
+static void sha_process(sha512_state& md, const void* src, u32 inlen)
+{
+    const u32 block_size = sizeof(sha512_state::buf);
+    auto in = static_cast<const unsigned char*>(src);
+
+    while(inlen > 0)
+    {
+        if(md.curlen == 0 && inlen >= block_size)
+        {
+            sha_compress(md, in);
+            md.length += block_size * 8;
+            in        += block_size;
+            inlen     -= block_size;
+        }
+        else
+        {
+            u32 n = min(inlen, (block_size - md.curlen));
+            std::memcpy(md.buf + md.curlen, in, n);
+            md.curlen += n;
+            in        += n;
+            inlen     -= n;
+
+            if(md.curlen == block_size)
+            {
+                sha_compress(md, md.buf);
+                md.length += 8*block_size;
+                md.curlen = 0;
+            }
+        }
+    }
+}
+
+static void sha_done(sha512_state& md, void *out)
+{
+    // Increase the length of the message
+    md.length += md.curlen * 8ULL;
+
+    // Append the '1' bit
+    md.buf[md.curlen++] = static_cast<unsigned char>(0x80);
+
+    // If the length is currently above 112 bytes we append zeros then compress.
+    // Then we can fall back to padding zeros and length encoding like normal.
+    if(md.curlen > 112)
+    {
+        while(md.curlen < 128)
+            md.buf[md.curlen++] = 0;
+        sha_compress(md, md.buf);
+        md.curlen = 0;
+    }
+
+    // Pad upto 120 bytes of zeroes
+    // note: that from 112 to 120 is the 64 MSB of the length.  We assume that
+    // you won't hash 2^64 bits of data... :-)
+    while(md.curlen < 120)
+        md.buf[md.curlen++] = 0;
+
+    // Store length
+    store64(md.length, md.buf+120);
+    sha_compress(md, md.buf);
+
+    // Copy output
+    for(int i = 0; i < 8; i++)
+        store64(md.state[i], static_cast<unsigned char*>(out)+(8*i));
+}
+
+// End public domain SHA2 implementation
+
+// Begin public domain BASE64
+// Thanks https://en.wikibooks.org/wiki/Algorithm_Implementation/Miscellaneous/Base64#C++
+
+typedef struct {
+    std::array<char, 65> encodeLookup;
+    char padCharacter;
+} CarafeBase64Charset;
+
+// Note, we use | internally as a separator for authenticated cookies.
+static CarafeBase64Charset CarafeBase64CharsetStandard __attribute__((unused)) = {
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    '='
+};
+
+static CarafeBase64Charset CarafeBase64CharsetURLSafe {
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+    '.'
+};
+
+template <typename T>
+std::string CarafeBase64Encode(T inputBuffer, size_t in_size, const CarafeBase64Charset &charset)
+{
+    std::string encodedString;
+    encodedString.reserve(((in_size/3) + (in_size % 3 > 0)) * 4);
+    uint32_t temp;
+    auto cursor = inputBuffer.begin();
+    for(size_t idx = 0; idx < in_size/3; idx++)
+    {
+        temp  = (*cursor++) << 16; //Convert to big endian
+        temp += (*cursor++) << 8;
+        temp += (*cursor++);
+        encodedString.append(1,charset.encodeLookup[(temp & 0x00FC0000) >> 18]);
+        encodedString.append(1,charset.encodeLookup[(temp & 0x0003F000) >> 12]);
+        encodedString.append(1,charset.encodeLookup[(temp & 0x00000FC0) >> 6 ]);
+        encodedString.append(1,charset.encodeLookup[(temp & 0x0000003F)      ]);
+    }
+    switch(in_size % 3)
+    {
+        case 1:
+            temp  = (*cursor++) << 16; //Convert to big endian
+            encodedString.append(1,charset.encodeLookup[(temp & 0x00FC0000) >> 18]);
+            encodedString.append(1,charset.encodeLookup[(temp & 0x0003F000) >> 12]);
+            encodedString.append(2,charset.padCharacter);
+            break;
+        case 2:
+            temp  = (*cursor++) << 16; //Convert to big endian
+            temp += (*cursor++) << 8;
+            encodedString.append(1,charset.encodeLookup[(temp & 0x00FC0000) >> 18]);
+            encodedString.append(1,charset.encodeLookup[(temp & 0x0003F000) >> 12]);
+            encodedString.append(1,charset.encodeLookup[(temp & 0x00000FC0) >> 6 ]);
+            encodedString.append(1,charset.padCharacter);
+            break;
+    }
+    return encodedString;
+}
+
+// End public domain BASE64
+
+class CarafeURLSafe {
+public:
+    static std::string encode(const char *s) { std::string s2 = s; return encode(s2); }
+    static std::string encode(const std::string &s) {
+        std::string r;
+        for(unsigned char c : s) {
+            if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '.' || c == '-' || c == '_' || c == '~') {
+                r += c;
+            } else {
+                std::array<char, 4> hex;
+                size_t len = snprintf(hex.data(), hex.size(), "%%%02X", c);
+                if (len >= hex.size()) throw std::out_of_range("Error in hex conversion");
+                r.append(hex.data(), len);
+            }
+        }
+        return r;
+    }
+
+    static std::string decode(const char *s) { std::string s2 = s; return decode(s2); }
+    static std::string decode(const std::string &s) {
+        std::string r;
+        for(size_t i = 0; i < s.size(); i++) {
+            if (s[i] != '%') {
+                r += s[i];
+            } else {
+                std::array<char, 3> hex;
+                char *end;
+                hex[0] = s[++i];
+                hex[1] = s[++i];
+                hex[2] = '\0';
+                char val = strtoul(hex.data(), &end, 16);
+                if (end != &hex[2] || (val == 0 && (hex[0] != '0' || hex[1] != '0'))) {
+                    // If strtoul returned 0 and our 2 characters aren't zeroes,
+                    // then strtoul was returning an error.
+                    throw std::out_of_range("Invalid URL encoding");
+                }
+                r += val;
+            }
+        }
+        return r;
+    }
+};
+
+template <typename T>
+std::string CarafeBase64Encode(T inputBuffer, const CarafeBase64Charset &charset) {
+    return CarafeBase64Encode(inputBuffer, inputBuffer.size(), charset);
+}
+
+template <typename T>
+std::string CarafeBase64Decode(const T& input, const CarafeBase64Charset &charset) {
+    uint_fast32_t leftover = 0;
+    char i;
+    std::string s;
+    s.reserve(input.size() * 3 / 4); // if the input lacks padding, this might be too much space
+    for (size_t x = 0; x < input.size(); x++) {
+        char c;
+        if (input[x] == charset.padCharacter) break;
+        for(c = 0; c < 64; c++) if (charset.encodeLookup[c] == input[x]) break;
+        if (x % 4 == 0) {
+            leftover = c << 2;
+            continue;
+        } else if (x % 4 == 1) {
+            i = leftover | (c >> 4);
+            leftover = c << 4;
+        } else if (x % 4 == 2) {
+            i = leftover | (c >> 2);
+            leftover = c << 6;
+        } else {
+            i = leftover | c;
+            //leftover = 0;
+        }
+        s += i;
+    }
+    return s;
+}
+
+class CarafeMACKey {
+private:
+    static constexpr size_t KEY_SIZE = 72; // Size of SHA512 output + a little mode padded to alignment
+    std::string key;
+
+    void hash_key() {
+        std::array<char, 64> out;
+        sha512_state s;
+
+        sha_init(s);
+        sha_process(s, key.data(), static_cast<u32>(key.size()));
+        sha_done(s, out.data());
+
+        key = std::string(out.data(), out.size());
+    }
+public:
+    CarafeMACKey(const std::string &s) {
+        // Put some sane limit on the key size.
+        if (s.size() < 16) throw std::out_of_range("Key length < 16 characters");
+        key = s;
+        hash_key();
+    }
+    CarafeMACKey() {
+        std::random_device rd;
+        static_assert(sizeof(decltype(rd())) == 4, "random_device return too small");
+        static_assert(KEY_SIZE % sizeof(decltype(rd())) == 0, "KEY_SIZE not a multiple of sizeof(decltype(rd()))");
+        key.reserve(KEY_SIZE);
+        for (size_t i = 0; i < KEY_SIZE / 4; i++) {
+            auto r = rd();
+            for (size_t x = 0; x < sizeof(decltype(rd())); x++) {
+                key += (char) r & 0xFF;
+                r = r >> 8;
+            }
+        }
+        hash_key();
+    }
+
+    const std::string &get_key() const { return key; }
+};
+
+class CarafeMAC {
+private:
+    // SHA512/264, so there are no padding characters. We also don't benefit
+    // from HMAC because we use random, hashed keys appended to data, and we
+    // discard 248 bits of output the attacker would need to guess.
+    static constexpr size_t MAC_SIZE = 33;
+    std::string mac;
+    const CarafeMACKey &key;
+public:
+    static_assert(MAC_SIZE * 4 % 3 == 0, "MAC_SIZE requires padding");
+    static constexpr size_t ENCODED_SIZE = MAC_SIZE * 4 / 3;
+
+    CarafeMAC(const CarafeMACKey &k) : key(k) {}
+
+    const std::string &compute_from_string(const std::string &in) {
+        sha512_state s;
+        std::array<char, 64> out;
+
+        if (in.size() > UINT32_MAX) throw std::out_of_range("Input too large");
+
+        sha_init(s);
+        sha_process(s, in.data(), static_cast<u32>(in.size()));
+        sha_process(s, key.get_key().data(), static_cast<u32>(key.get_key().size()));
+        sha_done(s, out.data());
+
+        mac = CarafeBase64Encode(out, MAC_SIZE, CarafeBase64CharsetURLSafe);
+        return mac;
+    }
+
+    const std::string &to_string() {
+        if (mac.size() == 0) throw std::runtime_error("invalid CarafeMAC");
+        return mac;
+    }
+
+    void from_safebase64(const std::string &in) {
+        if (in.size() != (MAC_SIZE * 3 / 4)) throw std::runtime_error("Invalid CarafeMAC");
+        mac = in;
+    }
+
+    bool operator==(const CarafeMAC &b) {
+        return *this == b.mac;
+    }
+
+    bool operator!=(const CarafeMAC &b) {
+        return !(*this == b.mac);
+    }
+
+    bool operator==(const std::string &b) {
+        unsigned char t = 0;
+        if (mac.size() == 0) throw std::runtime_error("invalid CarafeMACKey");
+        if (mac.size() != b.size()) return false;
+        for (size_t i = 0; i < mac.size(); i++) {
+            t |= mac[i] ^ b[i];
+        }
+        return t == 0;
+    }
+
+    bool operator!=(const std::string &b) {
+        return !(*this == b);
+    }
+};
+
+typedef std::unordered_map<std::string, std::string> CarafeCookieMap;
+
+class CarafeAuthenticatedCookie;
+class CarafeCookie {
+private:
+    friend CarafeAuthenticatedCookie;
+    CarafeCookieMap kv;
+public:
+    void load_data(std::string d) {
+        std::string::size_type start = 0;
+        while(start != std::string::npos && start < d.size()) {
+            std::string::size_type end_pos = d.find(';', start);
+            std::string::size_type eqpos = d.find('=', start);
+            if (end_pos == std::string::npos) end_pos = d.size();
+            if (eqpos > end_pos || eqpos == std::string::npos) {
+                while (d[start] == ' ') start++;
+                kv[d.substr(start, end_pos - start)] = "";
+            } else {
+                std::string key, val;
+                while (d[start] == ' ') start++;
+                key = CarafeURLSafe::decode(d.substr(start, eqpos - start));
+                val = CarafeURLSafe::decode(d.substr(eqpos + 1, end_pos - eqpos - 1));
+                if (key.size()) {
+                    kv[key] = val;
+                } else {
+                    kv[val] = "";
+                }
+            }
+            start = end_pos + 1;
+        }
+    }
+
+    CarafeCookie() {}
+    CarafeCookie(const std::string &d) {
+        load_data(d);
+    }
+
+    CarafeCookieMap &key_value() { return kv; }
+    void erase() {
+        kv.erase(kv.begin(), kv.end());
+    }
+
+    std::string serialize() {
+        std::string s;
+        for(const auto &i : kv) {
+            s += CarafeURLSafe::encode(i.first);
+            s += '=';
+            s += CarafeURLSafe::encode(i.second);
+            s += "; ";
+        }
+        if (s.size()) { // trailing space
+            s.pop_back();
+        }
+        return s;
+    }
+};
+
+class CarafeAuthenticatedCookie {
+private:
+    const CarafeMACKey &key;
+    CarafeCookie cookie;
+public:
+    CarafeAuthenticatedCookie(const CarafeMACKey &k) : key(k) {}
+    void load_data(const std::string &d) {
+        // split data on |, compare mac of first half to second, then decode.
+        auto sep = d.find('|');
+        if (sep == 0 || sep == d.size() - 1 || sep == std::string::npos) throw std::out_of_range("Invalid cookie");
+
+        std::string mac = d.substr(sep + 1, std::string::npos);
+        std::string data = d.substr(0, sep);
+
+        auto expected_mac = CarafeMAC(key);
+        expected_mac.compute_from_string(data);
+
+        if (expected_mac != mac) {
+            throw std::out_of_range("Invalid cookie");
+        }
+
+        data = CarafeBase64Decode(data, CarafeBase64CharsetURLSafe);
+        cookie.load_data(data);
+    }
+
+    CarafeCookieMap &key_value() { return cookie.kv; }
+    void erase() { cookie.erase(); }
+
+    std::string serialize() {
+        if (cookie.kv.count("_carafe_ts")) {
+            cookie.kv.emplace("_carafe_ts", std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
+        }
+
+        std::string s = CarafeBase64Encode(cookie.serialize(), CarafeBase64CharsetURLSafe);
+        std::string mac = CarafeMAC(key).compute_from_string(s);
+        return s + "|" + mac;
+    }
+};
 
 // Required to let us | together the enum.
+static_assert(sizeof(MHD_FLAG) == sizeof(unsigned int), "int can't hold MHD_FLAG");
+
 inline MHD_FLAG operator|(const MHD_FLAG a, const MHD_FLAG b) {
-    static_assert(sizeof(MHD_FLAG) == sizeof(int), "int can't hold MHD_FLAG");
-    return static_cast<MHD_FLAG>(static_cast<int>(a) | static_cast<int>(b));
+    return static_cast<MHD_FLAG>(static_cast<unsigned int>(a) | static_cast<unsigned int>(b));
 }
 
 inline MHD_FLAG operator&(const MHD_FLAG a, const MHD_FLAG b) {
-    return static_cast<MHD_FLAG>(static_cast<int>(a) & static_cast<int>(b));
+    return static_cast<MHD_FLAG>(static_cast<unsigned int>(a) & static_cast<unsigned int>(b));
 }
 
 inline MHD_FLAG operator~(const MHD_FLAG a) {
-    return static_cast<MHD_FLAG>(~(static_cast<int>(a)));
+    return static_cast<MHD_FLAG>(~(static_cast<unsigned int>(a)));
 }
 
 // Methods, stored as individual bits so they can be |'d together.
@@ -148,10 +666,11 @@ class CarafeResponse {
 public:
     int code;
     std::string body;
-    CarafeRequestStringMap headers, cookies;
+    CarafeRequestStringMap headers;
+    CarafeCookie cookies;
     CarafeResponse() : code(500) {};
     void reset() {
-        cookies.erase(cookies.begin(), cookies.end());
+        cookies.erase();
         headers.erase(headers.begin(), headers.end());
         code = 500;
     }
@@ -162,7 +681,8 @@ private:
     friend CarafeRequest;
     enum ValueType {
         ARGS,
-        COOKIES
+        COOKIES,
+        HEADERS
     };
     CarafeRequest &req;
     ValueType my_type;
@@ -175,9 +695,11 @@ public:
 
     // This could be a string_view, but would be the only thing requiring C++17 support.
     std::string get(std::string key, std::string def = "") {
-        return get(key.c_str(), def.c_str());
+        if (!all_args_populated) load_all();
+        auto f = all_args.find(key);
+        if (f == all_args.end()) return def;
+        return f->second;
     }
-    std::string get(const char *key, const char *def = nullptr);
 
     CarafeRequestStringMap::iterator begin() {
         if (!all_args_populated) load_all();
@@ -210,7 +732,8 @@ public:
     std::string version, path;
     CarafeHTTPMethod method;
     CarafeRequestPostDataMap post_data;
-    CarafeRequestConnectionValues args, cookies;
+    CarafeRequestConnectionValues args, headers;
+    CarafeCookie cookies;
     CarafeRequestStringMap vars;
     size_t total_post_data_size, max_upload_size;
 
@@ -221,10 +744,12 @@ public:
         path(u),
         method(method_to_int(m)),
         args(*this, CarafeRequestConnectionValues::ARGS),
-        cookies(*this, CarafeRequestConnectionValues::COOKIES),
+        headers(*this, CarafeRequestConnectionValues::HEADERS),
         total_post_data_size(0),
-        max_upload_size(mus) {
+        max_upload_size(mus)
+    {
         if (!connection) throw std::runtime_error("connection is null");
+        if (headers.get("cookie").size()) cookies.load_data(headers.get("cookie"));
     };
 
     inline const std::string &client_ip() {
@@ -356,20 +881,8 @@ private:
             MHD_add_response_header(mhd_response, h.first.c_str(), h.second.c_str());
         }
 
-        if (response.cookies.size()) {
-            size_t count = response.cookies.size();
-            size_t processed = 0;
-            std::string final_cookie;
-            for(const auto &h : response.cookies) {
-                final_cookie += h.first;
-                final_cookie += '=';
-                final_cookie += h.second;
-                if (processed++ <= count) {
-                    final_cookie += ';';
-                    final_cookie += ' ';
-                }
-            }
-            MHD_set_connection_value(connection, MHD_HEADER_KIND, MHD_HTTP_HEADER_SET_COOKIE, final_cookie.c_str());
+        if (response.cookies.key_value().size()) {
+            MHD_add_response_header(mhd_response, MHD_HTTP_HEADER_SET_COOKIE, response.cookies.serialize().c_str());
         }
 
         int ret = MHD_queue_response(connection, response.code, mhd_response);
@@ -381,11 +894,14 @@ private:
     static int mhd_header_parse(void *map_ptr, enum MHD_ValueKind kind, const char *key, const char *value) {
         if (!map_ptr || !key) return MHD_NO;
         CarafeRequestStringMap *storage = static_cast<CarafeRequestStringMap *>(map_ptr);
+        if (*key == '\0' && value && *value == '\0') return MHD_YES; // I don't know why all empty values show up but we don't want them.
 
+        std::string key_lc = key;
+        if (kind == MHD_HEADER_KIND) std::transform(key_lc.begin(), key_lc.end(), key_lc.begin(), ::tolower);
         if (value) {
-            storage->emplace(key, value);
+            storage->emplace(key_lc, value);
         } else {
-            storage->emplace(key, "");
+            storage->emplace(key_lc, "");
         }
 
         return MHD_YES;
@@ -558,35 +1074,16 @@ public:
     }
 };
 
-inline std::string CarafeRequestConnectionValues::get(const char *key, const char *def) {
-    const char *val;
-    switch (my_type) {
-        case ARGS:
-            val = MHD_lookup_connection_value(req.connection, MHD_GET_ARGUMENT_KIND, key);
-            if (val) return std::string(val);
-
-            val = MHD_lookup_connection_value(req.connection, MHD_POSTDATA_KIND, key);
-            if (val) return std::string(val);
-            break;
-
-        case COOKIES:
-            val = MHD_lookup_connection_value(req.connection, MHD_COOKIE_KIND, key);
-            if (val) return std::string(val);
-
-        default:
-            break;
-    }
-
-    if (def) return std::string(def);
-    throw std::out_of_range("key not found");
-}
-
 inline void CarafeRequestConnectionValues::load_all() {
     if (all_args_populated) return;
     switch (my_type) {
         case ARGS:
-            MHD_get_connection_values(req.connection, MHD_HEADER_KIND, CarafeHTTPD::mhd_header_parse, &all_args);
+            MHD_get_connection_values(req.connection, MHD_GET_ARGUMENT_KIND, CarafeHTTPD::mhd_header_parse, &all_args);
             MHD_get_connection_values(req.connection, MHD_POSTDATA_KIND, CarafeHTTPD::mhd_header_parse, &all_args);
+            break;
+
+        case HEADERS:
+            MHD_get_connection_values(req.connection, MHD_HEADER_KIND, CarafeHTTPD::mhd_header_parse, &all_args);
             break;
 
         case COOKIES:
