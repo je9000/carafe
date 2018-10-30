@@ -342,9 +342,10 @@ class CarafeMACKey {
 private:
     static constexpr size_t KEY_SIZE = 72; // Size of SHA512 output + a little mode padded to alignment
     std::string key;
+    sha512_state precomputed_key_state;
 
     void hash_key() {
-        std::array<char, 64> out;
+        std::array<char, HASH_SIZE> out;
         sha512_state s;
 
         sha_init(s);
@@ -352,8 +353,13 @@ private:
         sha_done(s, out.data());
 
         key = std::string(out.data(), out.size());
+
+        sha_init(precomputed_key_state);
+        sha_process(s, key.data(), static_cast<u32>(key.size()));
     }
 public:
+    static constexpr size_t HASH_SIZE = 64; // 512/8
+
     CarafeMACKey(const std::string &s) {
         // Put some sane limit on the key size.
         if (s.size() < 16) throw std::out_of_range("Key length < 16 characters");
@@ -376,17 +382,20 @@ public:
     }
 
     const std::string &get_key() const { return key; }
+    const void copy_keyed_state(sha512_state &s) const {
+        memcpy(&s, &precomputed_key_state, sizeof(precomputed_key_state));
+    }
 };
 
 class CarafeMAC {
 private:
+    std::string mac;
+    const CarafeMACKey &key;
+public:
     // SHA512/264, so there are no padding characters. We also don't benefit
     // from HMAC because we use random, hashed keys appended to data, and we
     // discard 248 bits of output the attacker would need to guess.
     static constexpr size_t MAC_SIZE = 33;
-    std::string mac;
-    const CarafeMACKey &key;
-public:
     static_assert(MAC_SIZE * 4 % 3 == 0, "MAC_SIZE requires padding");
     static constexpr size_t ENCODED_SIZE = MAC_SIZE * 4 / 3;
 
@@ -394,13 +403,13 @@ public:
 
     const std::string &compute_from_string(const std::string &in) {
         sha512_state s;
-        std::array<char, 64> out;
+        std::array<char, CarafeMACKey::HASH_SIZE> out;
 
         if (in.size() > UINT32_MAX) throw std::out_of_range("Input too large");
 
-        sha_init(s);
+        key.copy_keyed_state(s);
+
         sha_process(s, in.data(), static_cast<u32>(in.size()));
-        sha_process(s, key.get_key().data(), static_cast<u32>(key.get_key().size()));
         sha_done(s, out.data());
 
         mac = CarafeBase64Encode(out, MAC_SIZE, CarafeBase64CharsetURLSafe);
@@ -503,10 +512,10 @@ private:
     CarafeCookie cookie;
 public:
     CarafeAuthenticatedCookie(const CarafeMACKey &k) : key(k) {}
-    void load_data(const std::string &d) {
+    bool load_data(const std::string &d) {
         // split data on |, compare mac of first half to second, then decode.
         auto sep = d.find('|');
-        if (sep == 0 || sep == d.size() - 1 || sep == std::string::npos) throw std::out_of_range("Invalid cookie");
+        if (sep == 0 || sep == d.size() - 1 || sep == std::string::npos || d.size() - sep - 1 != CarafeMAC::ENCODED_SIZE) return false;
 
         std::string mac = d.substr(sep + 1, std::string::npos);
         std::string data = d.substr(0, sep);
@@ -515,11 +524,12 @@ public:
         expected_mac.compute_from_string(data);
 
         if (expected_mac != mac) {
-            throw std::out_of_range("Invalid cookie");
+            return false;
         }
 
         data = CarafeBase64Decode(data, CarafeBase64CharsetURLSafe);
         cookie.load_data(data);
+        return true;
     }
 
     CarafeCookieMap &key_value() { return cookie.kv; }
