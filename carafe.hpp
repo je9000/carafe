@@ -10,11 +10,16 @@
 #include <regex>
 #include <array>
 #include <chrono>
-#include <random>
 
 #include <stdlib.h>
 #include <string.h>
 #include <arpa/inet.h>
+
+#if defined(HAVE_GETRANDOM)
+#include <sys/random.h>
+#elif defined(_MSC_VER)
+#include <random>
+#endif
 
 #include <microhttpd.h>
 
@@ -212,17 +217,22 @@ typedef struct {
     char padCharacter;
 } CarafeBase64Charset;
 
-// Note, we use | internally as a separator for authenticated cookies.
+// Note, we use | internally as a separator for authenticated cookies, so don't
+// add it to any of these character sets!
 static CarafeBase64Charset CarafeBase64CharsetStandard __attribute__((unused)) = {
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
     '='
 };
 
+// Matches the "standard" web-safe base64 character set.
 static CarafeBase64Charset CarafeBase64CharsetURLSafe {
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
     '.'
 };
 
+#ifndef LITTLEENDIAN
+#error "Base64 routines only support little-endian architectures"
+#endif
 template <typename T>
 std::string CarafeBase64Encode(T inputBuffer, size_t in_size, const CarafeBase64Charset &charset)
 {
@@ -260,7 +270,7 @@ std::string CarafeBase64Encode(T inputBuffer, size_t in_size, const CarafeBase64
     return encodedString;
 }
 
-// End public domain BASE64
+// End public domain Base64
 
 class CarafeURLSafe {
 public:
@@ -273,7 +283,7 @@ public:
             } else {
                 std::array<char, 4> hex;
                 size_t len = snprintf(hex.data(), hex.size(), "%%%02X", c);
-                if (len >= hex.size()) throw std::out_of_range("Error in hex conversion");
+                if (len >= hex.size()) throw std::out_of_range("Error in hex conversion"); // Shouldn't happen.
                 r.append(hex.data(), len);
             }
         }
@@ -338,14 +348,16 @@ std::string CarafeBase64Decode(const T& input, const CarafeBase64Charset &charse
     return s;
 }
 
+// Holder (and possibly generator) of the MAC Key.
+// Pre-computes the hash of the key, so subsequent hashes are all already keyed.
 class CarafeMACKey {
 private:
-    static constexpr size_t KEY_SIZE = 72; // Size of SHA512 output + a little mode padded to alignment
+    static constexpr size_t DEFAULT_KEY_SIZE = 72; // Size of SHA512 output padded to alignment
     std::string key;
     sha512_state precomputed_key_state;
 
     void hash_key() {
-        std::array<char, HASH_SIZE> out;
+        std::array<char, MAC_SIZE> out;
         sha512_state s;
 
         sha_init(s);
@@ -358,7 +370,7 @@ private:
         sha_process(s, key.data(), static_cast<u32>(key.size()));
     }
 public:
-    static constexpr size_t HASH_SIZE = 64; // 512/8
+    static constexpr size_t MAC_SIZE = 64; // 512/8
 
     CarafeMACKey(const std::string &s) {
         // Put some sane limit on the key size.
@@ -367,10 +379,21 @@ public:
         hash_key();
     }
     CarafeMACKey() {
+        key.reserve(DEFAULT_KEY_SIZE);
+#if defined(HAVE_ARC4RANDOM_BUF) || defined(HAVE_GETRANDOM)
+        std::array<char, DEFAULT_KEY_SIZE> out;
+#if defined(HAVE_ARC4RANDOM_BUF)
+        arc4random_buf(static_cast<void *>(out.data()), out.size());
+#elif defined(HAVE_GETRANDOM)
+        getrandom(static_cast<void *>(out.data()), out.size(), GRND_NONBLOCK);
+#endif // random call
+        for(size_t i = 0; i < out.size(); i++) key += out[i];
+#elif defined(_MSC_VER)
+        // Microsoft documents std::random_device as being cryptographically
+        // random
         std::random_device rd;
         static_assert(sizeof(decltype(rd())) == 4, "random_device return too small");
         static_assert(KEY_SIZE % sizeof(decltype(rd())) == 0, "KEY_SIZE not a multiple of sizeof(decltype(rd()))");
-        key.reserve(KEY_SIZE);
         for (size_t i = 0; i < KEY_SIZE / 4; i++) {
             auto r = rd();
             for (size_t x = 0; x < sizeof(decltype(rd())); x++) {
@@ -378,15 +401,20 @@ public:
                 r = r >> 8;
             }
         }
+#else
+#error "Don't know how to generate cryptographically-secure random numbers on this platform"
+#endif
         hash_key();
     }
 
     const std::string &get_key() const { return key; }
-    const void copy_keyed_state(sha512_state &s) const {
-        memcpy(&s, &precomputed_key_state, sizeof(precomputed_key_state));
+    const void get_keyed_state(sha512_state &dest) const {
+        memcpy(&dest, &precomputed_key_state, sizeof(precomputed_key_state));
     }
 };
 
+// Class that represents the MAC on a string. Performs a secure MAC
+// string comparison.
 class CarafeMAC {
 private:
     std::string mac;
@@ -403,11 +431,11 @@ public:
 
     const std::string &compute_from_string(const std::string &in) {
         sha512_state s;
-        std::array<char, CarafeMACKey::HASH_SIZE> out;
+        std::array<char, CarafeMACKey::MAC_SIZE> out;
 
         if (in.size() > UINT32_MAX) throw std::out_of_range("Input too large");
 
-        key.copy_keyed_state(s);
+        key.get_keyed_state(s);
 
         sha_process(s, in.data(), static_cast<u32>(in.size()));
         sha_done(s, out.data());
@@ -457,7 +485,7 @@ private:
     friend CarafeAuthenticatedCookie;
     CarafeCookieMap kv;
 public:
-    void load_data(std::string d) {
+    void load_data(const std::string &d) {
         std::string::size_type start = 0;
         while(start != std::string::npos && start < d.size()) {
             std::string::size_type end_pos = d.find(';', start);
