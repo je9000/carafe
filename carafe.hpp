@@ -15,10 +15,14 @@
 #include <string.h>
 #include <arpa/inet.h>
 
+#ifdef CARAFE_SECURE_COOKIES
+#include <atomic>
+#include <mutex>
 #if defined(HAVE_GETRANDOM)
 #include <sys/random.h>
 #elif defined(_MSC_VER)
 #include <random>
+#endif
 #endif
 
 #include <microhttpd.h>
@@ -209,7 +213,7 @@ static void sha_done(sha512_state& md, void *out)
 
 // End public domain SHA2 implementation
 
-// Begin public domain BASE64
+// Begin public domain base64
 // Thanks https://en.wikibooks.org/wiki/Algorithm_Implementation/Miscellaneous/Base64#C++
 
 typedef struct {
@@ -348,66 +352,160 @@ std::string CarafeBase64Decode(const T& input, const CarafeBase64Charset &charse
     return s;
 }
 
+typedef std::unordered_map<std::string, std::string> CarafeCookieMap;
+
+static bool case_insensitive_equals(const std::string &a, const std::string &b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); i++) {
+        if (tolower(a[i]) != tolower(b[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+class CarafeCookiesBase {
+protected:
+    bool flag_secure = false;
+    bool flag_httponly = false;
+    CarafeCookieMap kv;
+public:
+    // We do our best, but surely there are cookies we can't format.
+    void load_data(const std::string &d) {
+        std::string::size_type start = 0;
+        std::string key, val;
+        while(start != std::string::npos && start < d.size()) {
+            std::string::size_type end_pos = d.find(';', start);
+            std::string::size_type eqpos = d.find('=', start);
+            if (end_pos == std::string::npos) end_pos = d.size();
+            if (eqpos > end_pos || eqpos == std::string::npos) {
+                while (d[start] == ' ') start++;
+                val = d.substr(start, end_pos - start);
+                // Special case-insensitive cookie flags. See rfc6265.
+                if (case_insensitive_equals(val, "secure")) {
+                    flag_secure = true;
+                } else if (case_insensitive_equals(val, "httponly")) {
+                    flag_httponly = true;
+                } else {
+                    kv[""] = val;
+                }
+            } else {
+                while (d[start] == ' ') start++;
+                key = d.substr(start, eqpos - start);
+                val = d.substr(eqpos + 1, end_pos - eqpos - 1);
+                // Special case-insensitive cookie names. See rfc6265.
+                if (case_insensitive_equals(key, "path")) {
+                    kv["path"] = val;
+                } else if (case_insensitive_equals(key, "expires")) {
+                    kv["expires"] = val;
+                } else if (case_insensitive_equals(key, "max-age")) {
+                    kv["max-age"] = val;
+                } else if (case_insensitive_equals(key, "domain")) {
+                    kv["domain"] = val;
+                } else {
+                    key = CarafeURLSafe::decode(key);
+                    val = CarafeURLSafe::decode(val);
+                    if (key.size() || val.size()) kv[key] = val; // key can be "", weird huh?
+                }
+            }
+            start = end_pos + 1;
+        }
+    }
+
+    CarafeCookiesBase() {}
+    CarafeCookiesBase(const std::string &d) {
+        load_data(d);
+    }
+
+    CarafeCookieMap &key_value() { return kv; }
+    void erase() {
+        kv.erase(kv.begin(), kv.end());
+        flag_secure = false;
+        flag_httponly = false;
+    }
+
+    std::string serialize() {
+        std::string s;
+        for(const auto &i : kv) {
+            if (!i.first.size() && !i.second.size()) continue;
+            s += CarafeURLSafe::encode(i.first);
+            s += '=';
+            s += CarafeURLSafe::encode(i.second);
+            s += ';';
+            s += ' ';
+        }
+        if (flag_secure) s += "Secure; ";
+        if (flag_httponly) s += "HttpOnly; ";
+        if (s.size()) { // trailing "; "
+            s.pop_back();
+            s.pop_back();
+        }
+        return s;
+    }
+};
+
+#ifdef CARAFE_SECURE_COOKIES
 // Holder (and possibly generator) of the MAC Key.
 // Pre-computes the hash of the key, so subsequent hashes are all already keyed.
-class CarafeMACKey {
+class CarafeSecureKey {
 private:
-    static constexpr size_t DEFAULT_KEY_SIZE = 72; // Size of SHA512 output padded to alignment
-    std::string key;
+    static constexpr size_t DEFAULT_KEY_SIZE = 64; // 512/8
     sha512_state precomputed_key_state;
 
-    void hash_key() {
-        std::array<char, MAC_SIZE> out;
-        sha512_state s;
-
-        sha_init(s);
-        sha_process(s, key.data(), static_cast<u32>(key.size()));
-        sha_done(s, out.data());
-
-        key = std::string(out.data(), out.size());
-
+    void precompute_state(const char *key, const size_t len) {
         sha_init(precomputed_key_state);
-        sha_process(s, key.data(), static_cast<u32>(key.size()));
+        if (len < 16 || len > UINT32_MAX) throw std::runtime_error("key.size() < 16 or > UINT32_MAX");
+        sha_process(precomputed_key_state, key, static_cast<u32>(len));
     }
+
 public:
     static constexpr size_t MAC_SIZE = 64; // 512/8
 
-    CarafeMACKey(const std::string &s) {
-        // Put some sane limit on the key size.
-        if (s.size() < 16) throw std::out_of_range("Key length < 16 characters");
-        key = s;
-        hash_key();
+    void rekey(const std::string &s) {
+        precompute_state(s.data(), s.size());
     }
-    CarafeMACKey() {
-        key.reserve(DEFAULT_KEY_SIZE);
-#if defined(HAVE_ARC4RANDOM_BUF) || defined(HAVE_GETRANDOM)
+
+    void rekey(void) {
         std::array<char, DEFAULT_KEY_SIZE> out;
 #if defined(HAVE_ARC4RANDOM_BUF)
+        // Documented as "always successful".
         arc4random_buf(static_cast<void *>(out.data()), out.size());
 #elif defined(HAVE_GETRANDOM)
-        getrandom(static_cast<void *>(out.data()), out.size(), GRND_NONBLOCK);
-#endif // random call
-        for(size_t i = 0; i < out.size(); i++) key += out[i];
+        // The documentation says reads of <= 256 will never be interrupted, and
+        // that's more than we'll need so rather than check for that case lets
+        // make sure we never ask for more.
+        static_assert(DEFAULT_KEY_SIZE <= 256);
+        if (getrandom(static_cast<void *>(out.data()), out.size(), 0) != out.size()) {
+            throw std::runtime_error("getrandom failed");
+        }
 #elif defined(_MSC_VER)
         // Microsoft documents std::random_device as being cryptographically
-        // random
+        // random. I don't have a windows to test on, but this is sloppy and
+        // should be replaced with something platform-specific.
         std::random_device rd;
-        static_assert(sizeof(decltype(rd())) == 4, "random_device return too small");
-        static_assert(KEY_SIZE % sizeof(decltype(rd())) == 0, "KEY_SIZE not a multiple of sizeof(decltype(rd()))");
-        for (size_t i = 0; i < KEY_SIZE / 4; i++) {
+        static_assert(DEFAULT_KEY_SIZE % sizeof(decltype(rd())) == 0, "DEFAULT_KEY_SIZE not a multiple of sizeof(decltype(rd()))");
+        size_t out_index = 0;
+        for (size_t i = 0; i < DEFAULT_KEY_SIZE / sizeof(decltype(rd()); i++) {
             auto r = rd();
             for (size_t x = 0; x < sizeof(decltype(rd())); x++) {
-                key += (char) r & 0xFF;
+                out[out_index++] = (char) r & 0xFF;
                 r = r >> 8;
             }
         }
 #else
 #error "Don't know how to generate cryptographically-secure random numbers on this platform"
 #endif
-        hash_key();
+        precompute_state(out.data(), out.size());
     }
 
-    const std::string &get_key() const { return key; }
+    CarafeSecureKey() {
+        rekey();
+    };
+
+    CarafeSecureKey(const std::string &s) {
+        rekey(s);
+    }
+
     const void get_keyed_state(sha512_state &dest) const {
         memcpy(&dest, &precomputed_key_state, sizeof(precomputed_key_state));
     }
@@ -415,10 +513,10 @@ public:
 
 // Class that represents the MAC on a string. Performs a secure MAC
 // string comparison.
-class CarafeMAC {
+class CarafeSecureCookieAuthenticator {
 private:
     std::string mac;
-    const CarafeMACKey &key;
+    const CarafeSecureKey &key;
 public:
     // SHA512/264, so there are no padding characters. We also don't benefit
     // from HMAC because we use random, hashed keys appended to data, and we
@@ -427,11 +525,11 @@ public:
     static_assert(MAC_SIZE * 4 % 3 == 0, "MAC_SIZE requires padding");
     static constexpr size_t ENCODED_SIZE = MAC_SIZE * 4 / 3;
 
-    CarafeMAC(const CarafeMACKey &k) : key(k) {}
+    CarafeSecureCookieAuthenticator(const CarafeSecureKey &k) : key(k) {}
 
     const std::string &compute_from_string(const std::string &in) {
         sha512_state s;
-        std::array<char, CarafeMACKey::MAC_SIZE> out;
+        std::array<char, CarafeSecureKey::MAC_SIZE> out;
 
         if (in.size() > UINT32_MAX) throw std::out_of_range("Input too large");
 
@@ -444,27 +542,27 @@ public:
         return mac;
     }
 
-    const std::string &to_string() {
-        if (mac.size() == 0) throw std::runtime_error("invalid CarafeMAC");
+    const std::string &to_string() const {
+        if (mac.size() == 0) throw std::runtime_error("invalid CarafeSecureKey");
         return mac;
     }
 
-    void from_safebase64(const std::string &in) {
-        if (in.size() != (MAC_SIZE * 3 / 4)) throw std::runtime_error("Invalid CarafeMAC");
+    void load_from_safebase64(const std::string &in) {
+        if (in.size() != (MAC_SIZE * 3 / 4)) throw std::runtime_error("Invalid input");
         mac = in;
     }
 
-    bool operator==(const CarafeMAC &b) {
+    bool operator==(const CarafeSecureCookieAuthenticator &b) const {
         return *this == b.mac;
     }
 
-    bool operator!=(const CarafeMAC &b) {
+    bool operator!=(const CarafeSecureCookieAuthenticator &b) const {
         return !(*this == b.mac);
     }
 
-    bool operator==(const std::string &b) {
+    bool operator==(const std::string &b) const {
         unsigned char t = 0;
-        if (mac.size() == 0) throw std::runtime_error("invalid CarafeMACKey");
+        if (mac.size() == 0) throw std::runtime_error("invalid CarafeSecureKey");
         if (mac.size() != b.size()) return false;
         for (size_t i = 0; i < mac.size(); i++) {
             t |= mac[i] ^ b[i];
@@ -472,107 +570,140 @@ public:
         return t == 0;
     }
 
-    bool operator!=(const std::string &b) {
+    bool operator!=(const std::string &b) const {
         return !(*this == b);
     }
 };
 
-typedef std::unordered_map<std::string, std::string> CarafeCookieMap;
-
-class CarafeAuthenticatedCookie;
-class CarafeCookie {
+typedef size_t CarafeCookieKeyManagerID;
+class CarafeCookieKeyManager {
 private:
-    friend CarafeAuthenticatedCookie;
-    CarafeCookieMap kv;
+    CarafeSecureKey encrypt_key;
+    CarafeCookieKeyManagerID next_id = 0;
+    std::unordered_map<size_t, CarafeSecureKey> decrypt_keys;
+    class Spinlock { // Only to be used with lock_guard.
+        std::atomic_flag flag = ATOMIC_FLAG_INIT;
+    public:
+        void lock() { while(flag.test_and_set()); }
+        void unlock() { flag.clear(); }
+    };
+
+    mutable Spinlock encrypt_key_lock, decrypt_key_lock;
 public:
-    void load_data(const std::string &d) {
-        std::string::size_type start = 0;
-        while(start != std::string::npos && start < d.size()) {
-            std::string::size_type end_pos = d.find(';', start);
-            std::string::size_type eqpos = d.find('=', start);
-            if (end_pos == std::string::npos) end_pos = d.size();
-            if (eqpos > end_pos || eqpos == std::string::npos) {
-                while (d[start] == ' ') start++;
-                kv[d.substr(start, end_pos - start)] = "";
-            } else {
-                std::string key, val;
-                while (d[start] == ' ') start++;
-                key = CarafeURLSafe::decode(d.substr(start, eqpos - start));
-                val = CarafeURLSafe::decode(d.substr(eqpos + 1, end_pos - eqpos - 1));
-                if (key.size()) {
-                    kv[key] = val;
-                } else {
-                    kv[val] = "";
-                }
-            }
-            start = end_pos + 1;
-        }
+    CarafeCookieKeyManager() {};
+    CarafeCookieKeyManager(const std::string &key) : encrypt_key(key) {};
+
+    // Don't want to copy the Spinlock, so just disable all copies. Shouldn't
+    // be necessary anyway.
+    CarafeCookieKeyManager(const CarafeCookieKeyManager &) = delete;
+
+    CarafeCookieKeyManagerID add_decrypt_key(const CarafeSecureKey &new_key) {
+        std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+        auto this_id = next_id++;
+        decrypt_keys[this_id] = new_key;
+        return this_id;
     }
 
-    CarafeCookie() {}
-    CarafeCookie(const std::string &d) {
-        load_data(d);
+    bool remove_decrypt_key(const CarafeCookieKeyManagerID id) {
+        std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+        return decrypt_keys.erase(id);
     }
 
-    CarafeCookieMap &key_value() { return kv; }
-    void erase() {
-        kv.erase(kv.begin(), kv.end());
+    bool is_decrypt_key(const CarafeCookieKeyManagerID id) const {
+        std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+        return decrypt_keys.count(id);
     }
 
-    std::string serialize() {
-        std::string s;
-        for(const auto &i : kv) {
-            s += CarafeURLSafe::encode(i.first);
-            s += '=';
-            s += CarafeURLSafe::encode(i.second);
-            s += "; ";
+    size_t decrypt_key_count() const {
+        std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+        return decrypt_keys.size();
+    }
+
+    CarafeSecureKey get_encrypt_key() const { // Important this returns a copy.
+        std::lock_guard<Spinlock> elock(encrypt_key_lock);
+        return encrypt_key;
+    }
+
+    void set_encrypt_key(const std::string &new_key) {
+        std::lock_guard<Spinlock> elock(encrypt_key_lock);
+        encrypt_key.rekey(new_key);
+    }
+
+    void generate_new_encrypt_key() {
+        std::lock_guard<Spinlock> elock(encrypt_key_lock);
+        encrypt_key.rekey();
+    }
+
+    CarafeSecureCookieAuthenticator compute(const std::string &data) const {
+        std::lock_guard<Spinlock> elock(encrypt_key_lock);
+        CarafeSecureCookieAuthenticator csca(encrypt_key);
+        csca.compute_from_string(data);
+        return csca;
+    }
+
+    bool check_valid(const std::string &data, const std::string &check_me) const {
+        {
+            std::lock_guard<Spinlock> elock(encrypt_key_lock);
+            CarafeSecureCookieAuthenticator csca(encrypt_key);
+            csca.compute_from_string(data);
+            if (data == check_me) return true;
         }
-        if (s.size()) { // trailing space
-            s.pop_back();
+
+        std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+        for(const auto &key : decrypt_keys) {
+            CarafeSecureCookieAuthenticator csca(key.second);
+            csca.compute_from_string(data);
+            if (data == check_me) return true;
         }
-        return s;
+
+        return false;
     }
 };
 
-class CarafeAuthenticatedCookie {
+class CarafeSecureCookies : private CarafeCookiesBase {
 private:
-    const CarafeMACKey &key;
-    CarafeCookie cookie;
+    const CarafeCookieKeyManager &cookie_keys;
+    bool auth_valid = false;
 public:
-    CarafeAuthenticatedCookie(const CarafeMACKey &k) : key(k) {}
+    CarafeSecureCookies(const CarafeCookieKeyManager &km) : CarafeCookiesBase(), cookie_keys(km) {}
+    CarafeSecureCookies(const CarafeCookieKeyManager &km, const std::string &d) : CarafeCookiesBase(), cookie_keys(km) {
+        load_data(d);
+    }
     bool load_data(const std::string &d) {
         // split data on |, compare mac of first half to second, then decode.
         auto sep = d.find('|');
-        if (sep == 0 || sep == d.size() - 1 || sep == std::string::npos || d.size() - sep - 1 != CarafeMAC::ENCODED_SIZE) return false;
+        if (sep == 0 || sep == d.size() - 1 || sep == std::string::npos || d.size() - sep - 1 != CarafeSecureCookieAuthenticator::ENCODED_SIZE) return false;
 
         std::string mac = d.substr(sep + 1, std::string::npos);
         std::string data = d.substr(0, sep);
 
-        auto expected_mac = CarafeMAC(key);
-        expected_mac.compute_from_string(data);
-
-        if (expected_mac != mac) {
+        if (!cookie_keys.check_valid(data, mac)) {
             return false;
         }
 
         data = CarafeBase64Decode(data, CarafeBase64CharsetURLSafe);
-        cookie.load_data(data);
+        CarafeCookiesBase::load_data(data);
+        auth_valid = true;
         return true;
     }
 
-    CarafeCookieMap &key_value() { return cookie.kv; }
-    void erase() { cookie.erase(); }
+    CarafeCookieMap &key_value() { return CarafeCookiesBase::kv; }
+    void erase() { CarafeCookiesBase::erase(); }
+    bool authenticated() { return auth_valid; }
 
     std::string serialize() {
-        if (cookie.kv.count("_carafe_ts")) {
-            cookie.kv.emplace("_carafe_ts", std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
+        if (CarafeCookiesBase::kv.count("_ts")) {
+            CarafeCookiesBase::kv.emplace("_ts", std::to_string(std::chrono::system_clock::now().time_since_epoch().count()));
         }
 
-        std::string s = CarafeBase64Encode(cookie.serialize(), CarafeBase64CharsetURLSafe);
-        std::string mac = CarafeMAC(key).compute_from_string(s);
-        return s + "|" + mac;
+        std::string s = CarafeBase64Encode(CarafeCookiesBase::serialize(), CarafeBase64CharsetURLSafe);
+        CarafeSecureCookieAuthenticator mac = cookie_keys.compute(s);
+        return s + "|" + mac.to_string();
     }
 };
+#endif // CARAFE_SECURE_COOKIES
+
+class CarafeCookies : public CarafeCookiesBase {};
 
 // Required to let us | together the enum.
 static_assert(sizeof(MHD_FLAG) == sizeof(unsigned int), "int can't hold MHD_FLAG");
@@ -624,7 +755,7 @@ class CarafeResponse;
 typedef std::unordered_map<std::string, std::string> CarafeRequestStringMap;
 typedef std::function<void(CarafeRequest &, CarafeResponse &)> CarafeRouteCallback;
 typedef std::function<void(CarafeRequest &, CarafeResponse &, const char *)> CarafeAccessLogCallback;
-typedef std::function<void(CarafeRequest &, const char *, std::exception &)> CarafeErrorLogCallback;
+typedef std::function<void(CarafeRequest &, const char *, const std::exception &)> CarafeErrorLogCallback;
 
 class CarafeRouteCallbackInfo {
 public:
@@ -705,7 +836,7 @@ public:
     int code;
     std::string body;
     CarafeRequestStringMap headers;
-    CarafeCookie cookies;
+    CarafeCookies cookies;
     CarafeResponse() : code(500) {};
     void reset() {
         cookies.erase();
@@ -717,6 +848,7 @@ public:
 class CarafeRequestConnectionValues {
 private:
     friend CarafeRequest;
+    friend CarafeHTTPD;
     enum ValueType {
         ARGS,
         COOKIES,
@@ -725,14 +857,17 @@ private:
     CarafeRequest &req;
     ValueType my_type;
     CarafeRequestStringMap all_args;
+    size_t &current_size, max_size;
     bool all_args_populated;
 
     void load_all();
 public:
-    CarafeRequestConnectionValues(CarafeRequest &r, ValueType vt) : req(r), my_type(vt), all_args_populated(false) {}
+    CarafeRequestConnectionValues(CarafeRequest &r, ValueType vt, size_t ms, size_t &shared_arg_size) :
+        req(r), my_type(vt), current_size(shared_arg_size), max_size(ms), all_args_populated(false)
+    {}
 
     // This could be a string_view, but would be the only thing requiring C++17 support.
-    std::string get(std::string key, std::string def = "") {
+    const std::string &get(const std::string &key, const std::string &def = "") {
         if (!all_args_populated) load_all();
         auto f = all_args.find(key);
         if (f == all_args.end()) return def;
@@ -758,7 +893,7 @@ private:
     struct MHD_PostProcessor *post_processor;
     std::string client_ip_str;
 
-    inline static bool case_insensitive_equals(const char *a, const char *b) {
+    static bool case_insensitive_equals(const char *a, const char *b) {
         size_t i;
         for(i = 0; a[i] != '\0' || b[i] != '\0'; i++) {
             if ((a[i] & 0x7F) != (b[i] & 0x7F)) return false;
@@ -767,24 +902,31 @@ private:
     }
 
 public:
+    size_t total_post_data_size, max_upload_size;
+    size_t total_header_size, max_header_size;
     std::string version, path;
     CarafeHTTPMethod method;
     CarafeRequestPostDataMap post_data;
     CarafeRequestConnectionValues args, headers;
-    CarafeCookie cookies;
+    CarafeCookies cookies;
     CarafeRequestStringMap vars;
-    size_t total_post_data_size, max_upload_size;
+    void *context;
 
-    CarafeRequest(struct MHD_Connection *c, const char *m, const char *v, const char *u, size_t mus) :
+    size_t current_arg_size = 0;
+
+    CarafeRequest(struct MHD_Connection *c, const char *m, const char *v, const char *u, size_t max_up, size_t max_header, void *ctx) :
         connection(c),
         post_processor(nullptr),
+        total_post_data_size(0),
+        max_upload_size(max_up),
+        total_header_size(0),
+        max_header_size(max_header),
         version(v),
         path(u),
         method(method_to_int(m)),
-        args(*this, CarafeRequestConnectionValues::ARGS),
-        headers(*this, CarafeRequestConnectionValues::HEADERS),
-        total_post_data_size(0),
-        max_upload_size(mus)
+        args(*this, CarafeRequestConnectionValues::ARGS, max_header, current_arg_size),
+        headers(*this, CarafeRequestConnectionValues::HEADERS, max_header, current_arg_size),
+        context(ctx)
     {
         if (!connection) throw std::runtime_error("connection is null");
         if (headers.get("cookie").size()) cookies.load_data(headers.get("cookie"));
@@ -856,7 +998,7 @@ private:
         CarafeHTTPD *chd = static_cast<CarafeHTTPD *>(microhttpd_ptr);
 
         if (!*context_data) { // Phase 1
-            CarafeRequest *request = new (std::nothrow) CarafeRequest(connection, method, version, url, chd->max_upload_size);
+            CarafeRequest *request = new (std::nothrow) CarafeRequest(connection, method, version, url, chd->max_upload_size, chd->max_header_size, chd->context);
             if (!request) return MHD_NO;
             *context_data = request;
             return MHD_YES;
@@ -904,8 +1046,10 @@ private:
         if (chd->access_log_callback) {
             try {
                 chd->access_log_callback(*request, response, method);
+            } catch (const std::exception& e) {
+                chd->error_log_callback(*request, "Exception caught while calling access_log_callback", e);
             } catch (...) {
-                ; // Oh well?
+                // We tried...
             }
         }
 
@@ -931,15 +1075,25 @@ private:
 
     static int mhd_header_parse(void *map_ptr, enum MHD_ValueKind kind, const char *key, const char *value) {
         if (!map_ptr || !key) return MHD_NO;
-        CarafeRequestStringMap *storage = static_cast<CarafeRequestStringMap *>(map_ptr);
+        CarafeRequestConnectionValues *values = static_cast<CarafeRequestConnectionValues *>(map_ptr);
         if (*key == '\0' && value && *value == '\0') return MHD_YES; // I don't know why all empty values show up but we don't want them.
 
         std::string key_lc = key;
+        auto &storage = values->all_args;
+
         if (kind == MHD_HEADER_KIND) std::transform(key_lc.begin(), key_lc.end(), key_lc.begin(), ::tolower);
+
+        size_t previous_size = values->current_size;
+        values->current_size += key_lc.size();
+        if (values->current_size > values->max_size || values->current_size < previous_size) return MHD_NO;
+
         if (value) {
-            storage->emplace(key_lc, value);
+            previous_size = values->current_size;
+            values->current_size += strlen(value);
+            if (values->current_size > values->max_size || values->current_size < previous_size) return MHD_NO;
+            storage.emplace(key_lc, value);
         } else {
-            storage->emplace(key_lc, "");
+            storage.emplace(key_lc, "");
         }
 
         return MHD_YES;
@@ -988,24 +1142,27 @@ private:
     }
 
 public:
-    size_t max_upload_size;
+    size_t max_upload_size, max_header_size;
     volatile bool keep_running;
     CarafeAccessLogCallback access_log_callback;
     CarafeErrorLogCallback error_log_callback;
     unsigned int timeout, thread_pool_size;
     bool dual_stack;
     bool debug;
+    void *context;
 
     CarafeHTTPD(uint_fast16_t p) :
         listen_port(p),
         daemon(nullptr),
         daemon6(nullptr),
         max_upload_size(10*1024*1024), // 10 megs, arbitrary
+        max_header_size(1*1024*1024), // 1 meg, arbitrary
         keep_running(true),
         timeout(60),
         thread_pool_size(1),
         dual_stack(true),
-        debug(false)
+        debug(false),
+        context(nullptr)
     {};
 
     ~CarafeHTTPD() noexcept {
@@ -1116,16 +1273,16 @@ inline void CarafeRequestConnectionValues::load_all() {
     if (all_args_populated) return;
     switch (my_type) {
         case ARGS:
-            MHD_get_connection_values(req.connection, MHD_GET_ARGUMENT_KIND, CarafeHTTPD::mhd_header_parse, &all_args);
-            MHD_get_connection_values(req.connection, MHD_POSTDATA_KIND, CarafeHTTPD::mhd_header_parse, &all_args);
+            MHD_get_connection_values(req.connection, MHD_GET_ARGUMENT_KIND, CarafeHTTPD::mhd_header_parse, this);
+            MHD_get_connection_values(req.connection, MHD_POSTDATA_KIND, CarafeHTTPD::mhd_header_parse, this);
             break;
 
         case HEADERS:
-            MHD_get_connection_values(req.connection, MHD_HEADER_KIND, CarafeHTTPD::mhd_header_parse, &all_args);
+            MHD_get_connection_values(req.connection, MHD_HEADER_KIND, CarafeHTTPD::mhd_header_parse, this);
             break;
 
         case COOKIES:
-            MHD_get_connection_values(req.connection, MHD_COOKIE_KIND, CarafeHTTPD::mhd_header_parse, &all_args);
+            MHD_get_connection_values(req.connection, MHD_COOKIE_KIND, CarafeHTTPD::mhd_header_parse, this);
             break;
 
         default:
