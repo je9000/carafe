@@ -577,7 +577,7 @@ public:
 // Pre-computes the hash of the key, so subsequent hashes are all already keyed.
 class CarafeSecureKey {
 private:
-    static constexpr size_t DEFAULT_KEY_SIZE = 64; // 512/8
+    static constexpr size_t DEFAULT_KEY_SIZE = 24; // Arbitrary
     sha512_state precomputed_key_state;
 
     void precompute_state(const char *key, const size_t len) {
@@ -612,19 +612,17 @@ public:
     }
 };
 
-// Class that represents the MAC on a string. Performs a secure MAC
-// string comparison.
+// Class that represents the MAC on a string. Performs a secure MAC string
+// comparison.
 class CarafeSecureCookieAuthenticator {
 private:
-    std::string mac;
+    std::string mac; // MAC stored in url-safe base64 encoding.
     const CarafeSecureKey &key;
 public:
-    // SHA512/264, so there are no padding characters. We also don't benefit
-    // from HMAC because we use random, hashed keys appended to data, and we
-    // discard 248 bits of output the attacker would need to guess.
+    // SHA512/264, so there are no base64 padding characters.
     static constexpr size_t MAC_SIZE = 33;
-    static_assert(MAC_SIZE * 4 % 3 == 0, "MAC_SIZE requires padding");
-    static constexpr size_t ENCODED_SIZE = MAC_SIZE * 4 / 3;
+    static_assert((MAC_SIZE * 4) % 3 == 0, "MAC_SIZE requires padding");
+    static constexpr size_t ENCODED_SIZE = (MAC_SIZE * 4) / 3;
 
     CarafeSecureCookieAuthenticator(const CarafeSecureKey &k) : key(k) {}
 
@@ -644,7 +642,7 @@ public:
     }
 
     const std::string &to_string() const {
-        if (mac.size() == 0) throw std::runtime_error("invalid CarafeSecureKey");
+        if (mac.size() == 0) throw std::runtime_error("This CarafeSecureCookieAuthenticator not initialized");
         return mac;
     }
 
@@ -663,7 +661,7 @@ public:
 
     bool operator==(const std::string &b) const {
         unsigned char t = 0;
-        if (mac.size() == 0) throw std::runtime_error("invalid CarafeSecureKey");
+        if (mac.size() == 0) throw std::runtime_error("This CarafeSecureCookieAuthenticator not initialized");
         if (mac.size() != b.size()) return false;
         for (size_t i = 0; i < mac.size(); i++) {
             t |= mac[i] ^ b[i];
@@ -676,12 +674,16 @@ public:
     }
 };
 
-typedef size_t CarafeCookieKeyManagerID;
+typedef uint64_t CarafeCookieKeyManagerID;
+typedef struct {
+    CarafeSecureKey key;
+    std::chrono::time_point<std::chrono::system_clock> ts;
+} CarafeCookieSecreKeyAndTime;
+
 class CarafeCookieKeyManager {
 private:
     CarafeSecureKey encrypt_key;
-    CarafeCookieKeyManagerID next_id = 0;
-    std::unordered_map<size_t, CarafeSecureKey> decrypt_keys;
+    std::unordered_map<CarafeCookieKeyManagerID, CarafeCookieSecreKeyAndTime> decrypt_keys;
     class Spinlock { // Only to be used with lock_guard.
         std::atomic_flag flag = ATOMIC_FLAG_INIT;
     public:
@@ -690,6 +692,15 @@ private:
     };
 
     mutable Spinlock encrypt_key_lock, decrypt_key_lock;
+
+    CarafeCookieKeyManagerID add_decrypt_key_no_lock(const CarafeSecureKey &new_key) {
+        CarafeCookieKeyManagerID this_id;
+        do {
+            CarafeRandom::fill(reinterpret_cast<char *>(&this_id), sizeof(this_id));
+        } while (decrypt_keys.count(this_id));
+        decrypt_keys[this_id] = { new_key, std::chrono::system_clock::now() };
+        return this_id;
+    }
 public:
     CarafeCookieKeyManager() {};
     CarafeCookieKeyManager(const std::string &key) : encrypt_key(key) {};
@@ -700,9 +711,7 @@ public:
 
     CarafeCookieKeyManagerID add_decrypt_key(const CarafeSecureKey &new_key) {
         std::lock_guard<Spinlock> dlock(decrypt_key_lock);
-        auto this_id = next_id++;
-        decrypt_keys[this_id] = new_key;
-        return this_id;
+        return add_decrypt_key_no_lock(new_key);
     }
 
     bool remove_decrypt_key(const CarafeCookieKeyManagerID id) {
@@ -710,7 +719,7 @@ public:
         return decrypt_keys.erase(id);
     }
 
-    bool is_decrypt_key(const CarafeCookieKeyManagerID id) const {
+    bool has_decrypt_key(const CarafeCookieKeyManagerID id) const {
         std::lock_guard<Spinlock> dlock(decrypt_key_lock);
         return decrypt_keys.count(id);
     }
@@ -720,19 +729,43 @@ public:
         return decrypt_keys.size();
     }
 
+    void expire_old_decrypt_keys(const std::chrono::seconds age) {
+        auto now = std::chrono::system_clock::now();
+        std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+
+        for (auto it = decrypt_keys.cbegin(); it != decrypt_keys.cend(); ) {
+            const auto &ts = it->second.ts;
+            if (now > ts && now - age > ts) {
+                it = decrypt_keys.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
     CarafeSecureKey get_encrypt_key() const { // Important this returns a copy.
         std::lock_guard<Spinlock> elock(encrypt_key_lock);
         return encrypt_key;
     }
 
-    void set_encrypt_key(const std::string &new_key) {
+    CarafeCookieKeyManagerID set_encrypt_key(const std::string &new_key) {
+        // Order is important
         std::lock_guard<Spinlock> elock(encrypt_key_lock);
+        std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+
+        auto r = add_decrypt_key_no_lock(encrypt_key);
         encrypt_key.rekey(new_key);
+        return r;
     }
 
-    void generate_new_encrypt_key() {
+    CarafeCookieKeyManagerID generate_new_encrypt_key() {
+        // Order is important
         std::lock_guard<Spinlock> elock(encrypt_key_lock);
+        std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+
+        auto r = add_decrypt_key_no_lock(encrypt_key);
         encrypt_key.rekey();
+        return r;
     }
 
     CarafeSecureCookieAuthenticator compute(const std::string &data) const {
@@ -752,7 +785,7 @@ public:
 
         std::lock_guard<Spinlock> dlock(decrypt_key_lock);
         for(const auto &key : decrypt_keys) {
-            CarafeSecureCookieAuthenticator csca(key.second);
+            CarafeSecureCookieAuthenticator csca(key.second.key);
             csca.compute_from_string(data);
             if (data == check_me) return true;
         }
