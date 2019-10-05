@@ -18,11 +18,12 @@
 #ifdef CARAFE_SECURE_COOKIES
 #include <atomic>
 #include <mutex>
+#endif
+
 #if defined(HAVE_GETRANDOM)
 #include <sys/random.h>
 #elif defined(_MSC_VER)
 #include <random>
-#endif
 #endif
 
 #include <microhttpd.h>
@@ -298,14 +299,15 @@ public:
     static std::string decode(const std::string &s) {
         std::string r;
         for(size_t i = 0; i < s.size(); i++) {
+            std::array<char, 3> hex;
+            hex[2] = '\0';
             if (s[i] != '%') {
                 r += s[i];
             } else {
-                std::array<char, 3> hex;
                 char *end;
+                // std::string will throw if we read past the end, no need to check ourselves.
                 hex[0] = s[++i];
                 hex[1] = s[++i];
-                hex[2] = '\0';
                 char val = strtoul(hex.data(), &end, 16);
                 if (end != &hex[2] || (val == 0 && (hex[0] != '0' || hex[1] != '0'))) {
                     // If strtoul returned 0 and our 2 characters aren't zeroes,
@@ -314,6 +316,46 @@ public:
                 }
                 r += val;
             }
+        }
+        return r;
+    }
+};
+
+class CarafeHex {
+public:
+    static std::string encode(const std::string &str) { return encode(str.data(), str.size()); }
+    static std::string encode(const char *s) { return encode(s, strlen(s)); }
+    static std::string encode(const char *s, size_t len) {
+        std::string r;
+        r.reserve(len * 2);
+        for(size_t i = 0; i < len; i++) {
+            std::array<char, 3> hex;
+            size_t len = snprintf(hex.data(), hex.size(), "%02X", s[i]);
+            if (len >= hex.size()) throw std::out_of_range("Error in hex conversion"); // Shouldn't happen.
+            r.append(hex.data(), len);
+        }
+        return r;
+    }
+
+    static std::string decode(const std::string &str) { return decode(str.data(), str.size()); }
+    static std::string decode(const char *s) { return decode(s, strlen(s)); }
+    static std::string decode(const char *s, size_t len) {
+        if (len % 2 != 0) throw std::out_of_range("Invalid hex encoding");
+        std::string r;
+        std::array<char, 3> hex;
+        r.reserve(len / 2);
+        hex[2] = '\0';
+        for(size_t i = 0; i < len / 2; i++) {
+            char *end;
+            hex[0] = s[i++];
+            hex[1] = s[i];
+            char val = strtoul(hex.data(), &end, 16);
+            if (end != &hex[2] || (val == 0 && (hex[0] != '0' || hex[1] != '0'))) {
+                // If strtoul returned 0 and our 2 characters aren't zeroes,
+                // then strtoul was returning an error.
+                throw std::out_of_range("Invalid hex encoding");
+            }
+            r += val;
         }
         return r;
     }
@@ -354,23 +396,25 @@ std::string CarafeBase64Decode(const T& input, const CarafeBase64Charset &charse
 
 typedef std::unordered_map<std::string, std::string> CarafeCookieMap;
 
-static bool case_insensitive_equals(const std::string &a, const std::string &b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); i++) {
-        if (tolower(a[i]) != tolower(b[i])) {
-            return false;
-        }
-    }
-    return true;
-}
-
 class CarafeCookiesBase {
 protected:
     bool flag_secure = false;
     bool flag_httponly = false;
     CarafeCookieMap kv;
+private:
+    static bool case_insensitive_equals(const std::string &a, const char *s) {
+        if (!s) return false;
+        size_t slen = strlen(s);
+        if (a.size() != slen) return false;
+        for (size_t i = 0; i < a.size(); i++) {
+            if (tolower(a[i]) != tolower(s[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
 public:
-    // We do our best, but surely there are cookies we can't format.
+    // We do our best, but surely there are cookies we can't parse.
     void load_data(const std::string &d) {
         std::string::size_type start = 0;
         std::string key, val;
@@ -444,6 +488,90 @@ public:
     }
 };
 
+class CarafeRandom {
+private:
+#if defined(_MSC_VER)
+    static std::random_device rd;
+    static const size_t chunk_size = sizeof(decltype(rd()));
+#endif
+public:
+    static void fill(char *buf, size_t len) {
+#if defined(HAVE_ARC4RANDOM_BUF)
+        // Documented as "always successful".
+        arc4random_buf(buf, len);
+#elif defined(HAVE_GETRANDOM)
+        size_t filled = 0;
+        while (filled < len) {
+            ssize_t r = getrandom(buf + filled, len - filled, 0);
+            if (r >= 0) {
+                filled += r;
+            } else {
+                if (r != -1 || errno != EINTR) throw std::runtime_error("getrandom failed");
+            }
+        }
+#elif defined(_MSC_VER)
+        // Microsoft documents std::random_device as being cryptographically
+        // random. I don't have a windows to test on though!
+        size_t filled = 0;
+        while (filled < len) {
+            auto r = rd();
+            while (len - filled <= chunk_size) {
+                memcpy(&buf[filled], &r, chunk_size);
+                filled += chunk_size;
+            }
+            for (size_t x = 0; x < chunk_size && filled < len; x++) {
+                buf[filled++] = r & 0xFF;
+                r = r >> 8;
+            }
+        }
+#else
+#error "Don't know how to generate cryptographically-secure random numbers on this platform"
+#endif
+    }
+
+    template <typename T>
+    static void fill(T in) {
+        fill(in.data(), in.size());
+    }
+
+    static std::string get(size_t size = 16) {
+        char temp[size];
+        fill(temp, size);
+        return std::string(temp, size);
+    }
+
+    static std::string get_base64(size_t size = 16) {
+        std::vector<char> temp;
+        temp.resize(size);
+        fill(temp);
+        return CarafeBase64Encode(temp, CarafeBase64CharsetURLSafe);
+    }
+
+    // uuid v4
+    static std::string uuid() {
+        std::array<char, 16> buf;
+        fill(buf);
+        char &version = buf[6];
+        char &variant = buf[8];
+        version &= 0b00001111;
+        version |= 0b01000000;
+        variant &= 0b00111111;
+        variant |= 0b10000000;
+        std::string r;
+        r.reserve(36);
+        r += CarafeHex::encode(buf.data(), 4);
+        r += '-';
+        r += CarafeHex::encode(&buf.at(4), 2);
+        r += '-';
+        r += CarafeHex::encode(&buf.at(6), 2);
+        r += '-';
+        r += CarafeHex::encode(&buf.at(8), 2);
+        r += '-';
+        r += CarafeHex::encode(&buf.at(10), 6);
+        return r;
+    }
+};
+
 #ifdef CARAFE_SECURE_COOKIES
 // Holder (and possibly generator) of the MAC Key.
 // Pre-computes the hash of the key, so subsequent hashes are all already keyed.
@@ -467,34 +595,7 @@ public:
 
     void rekey(void) {
         std::array<char, DEFAULT_KEY_SIZE> out;
-#if defined(HAVE_ARC4RANDOM_BUF)
-        // Documented as "always successful".
-        arc4random_buf(static_cast<void *>(out.data()), out.size());
-#elif defined(HAVE_GETRANDOM)
-        // The documentation says reads of <= 256 will never be interrupted, and
-        // that's more than we'll need so rather than check for that case lets
-        // make sure we never ask for more.
-        static_assert(DEFAULT_KEY_SIZE <= 256);
-        if (getrandom(static_cast<void *>(out.data()), out.size(), 0) != out.size()) {
-            throw std::runtime_error("getrandom failed");
-        }
-#elif defined(_MSC_VER)
-        // Microsoft documents std::random_device as being cryptographically
-        // random. I don't have a windows to test on, but this is sloppy and
-        // should be replaced with something platform-specific.
-        std::random_device rd;
-        static_assert(DEFAULT_KEY_SIZE % sizeof(decltype(rd())) == 0, "DEFAULT_KEY_SIZE not a multiple of sizeof(decltype(rd()))");
-        size_t out_index = 0;
-        for (size_t i = 0; i < DEFAULT_KEY_SIZE / sizeof(decltype(rd()); i++) {
-            auto r = rd();
-            for (size_t x = 0; x < sizeof(decltype(rd())); x++) {
-                out[out_index++] = (char) r & 0xFF;
-                r = r >> 8;
-            }
-        }
-#else
-#error "Don't know how to generate cryptographically-secure random numbers on this platform"
-#endif
+        CarafeRandom::fill(out);
         precompute_state(out.data(), out.size());
     }
 
@@ -1143,7 +1244,7 @@ private:
 
 public:
     size_t max_upload_size, max_header_size;
-    volatile bool keep_running;
+    bool keep_running;
     CarafeAccessLogCallback access_log_callback;
     CarafeErrorLogCallback error_log_callback;
     unsigned int timeout, thread_pool_size;
