@@ -347,17 +347,17 @@ public:
     HTTPMethod method;
     RequestPostDataMap post_data;
     RequestConnectionValues args, headers;
-    CarafeCookies cookies;
-    CarafeRequestStringMap vars;
+    Cookies cookies;
+    RequestStringMap vars;
     void *context;
 
     size_t current_arg_size = 0;
 
-    CarafeRequest(struct MHD_Connection *, const char *, const char *, const char *, size_t, size_t, void *);
+    Request(struct MHD_Connection *, const char *, const char *, const char *, size_t, size_t, void *);
 
     const std::string &client_ip();
 
-    inline static CarafeHTTPMethod method_to_int(const char *);
+    inline static HTTPMethod method_to_int(const char *);
 };
 
 class HTTPD {
@@ -366,7 +366,7 @@ private:
     uint_fast16_t listen_port;
     struct MHD_Daemon *daemon;
     struct MHD_Daemon *daemon6;
-    std::vector<CarafeRouteCallbackInfo> routes;
+    std::vector<RouteCallbackInfo> routes;
 
     static int mhd_handler(void *,
                            struct MHD_Connection *,
@@ -394,26 +394,26 @@ private:
 public:
     size_t max_upload_size, max_header_size;
     bool keep_running;
-    CarafeAccessLogCallback access_log_callback;
-    CarafeErrorLogCallback error_log_callback;
+    AccessLogCallback access_log_callback;
+    ErrorLogCallback error_log_callback;
     unsigned int timeout, thread_pool_size;
     bool dual_stack;
     bool debug;
     void *context;
 
-    CarafeHTTPD(uint_fast16_t p);
-    ~CarafeHTTPD() noexcept;
+    HTTPD(uint_fast16_t p);
+    ~HTTPD() noexcept;
 
     void run();
 
     void run_forever();
 
-    static std::string generate_access_log(CarafeRequest &, CarafeResponse &, const char *);
+    static std::string generate_access_log(Request &, Response &, const char *);
 
-    void add_route(const char *, const CarafeHTTPMethod, const CarafeRouteCallback &);
-    void add_route(const std::string &, const CarafeHTTPMethod, const CarafeRouteCallback &);
+    void add_route(const char *, const HTTPMethod, const RouteCallback &);
+    void add_route(const std::string &, const HTTPMethod, const RouteCallback &);
 
-    void handle_route(CarafeRequest &, CarafeResponse &, const char *);
+    void handle_route(Request &, Response &, const char *);
 };
 
 };

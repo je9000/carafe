@@ -17,6 +17,8 @@
 // Begin public domain SHA512 implementation
 // Thanks https://github.com/kalven/sha-2
 
+using namespace Carafe;
+
 static const u64 K[80] =
 {
     0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL, 0xb5c0fbcfec4d3b2fULL, 0xe9b5dba58189dbbcULL, 0x3956c25bf348b538ULL,
@@ -191,11 +193,11 @@ static void sha_done(sha512_state& md, void *out)
 // End public domain SHA2 implementation
 
 template <typename T>
-std::string CarafeSha512::calculate(const T &s) {
+std::string Sha512::calculate(const T &s) {
     return calculate(s.data(), s.size());
 }
 
-std::string CarafeSha512::calculate(const char *buf, size_t size) {
+std::string Sha512::calculate(const char *buf, size_t size) {
     sha512_state s;
     std::array<char, SHA512_OUTPUT_SIZE> out;
 
@@ -209,12 +211,12 @@ std::string CarafeSha512::calculate(const char *buf, size_t size) {
 // Based on public domain base64
 // Thanks https://en.wikibooks.org/wiki/Algorithm_Implementation/Miscellaneous/Base64#C++
 
-const CarafeBase64::Base64Charset CarafeBase64::CharsetStandard __attribute__((unused)) = {
+const Base64::Base64Charset Base64::CharsetStandard __attribute__((unused)) = {
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
     '='
 };
 
-const CarafeBase64::Base64Charset CarafeBase64::CharsetURLSafe {
+const Base64::Base64Charset Base64::CharsetURLSafe {
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
     '.'
 };
@@ -223,7 +225,7 @@ const CarafeBase64::Base64Charset CarafeBase64::CharsetURLSafe {
 #error "Base64 routines only support little-endian architectures"
 #endif
 template <typename T>
-std::string CarafeBase64::encode(const T& inputBuffer, size_t in_size, const Base64Charset &charset)
+std::string Base64::encode(const T& inputBuffer, size_t in_size, const Base64Charset &charset)
 {
     std::string encodedString;
     encodedString.reserve(((in_size/3) + (in_size % 3 > 0)) * 4);
@@ -260,12 +262,12 @@ std::string CarafeBase64::encode(const T& inputBuffer, size_t in_size, const Bas
 }
 
 template <typename T>
-std::string CarafeBase64::encode(const T& inputBuffer, const Base64Charset &charset) {
+std::string Base64::encode(const T& inputBuffer, const Base64Charset &charset) {
     return encode(inputBuffer, inputBuffer.size(), charset);
 }
 
 template <typename T>
-std::string CarafeBase64::decode(const T& inputBuffer, size_t in_size, const Base64Charset &charset) {
+std::string Base64::decode(const T& inputBuffer, size_t in_size, const Base64Charset &charset) {
     uint_fast32_t leftover = 0;
     char i;
     std::string s;
@@ -293,15 +295,15 @@ std::string CarafeBase64::decode(const T& inputBuffer, size_t in_size, const Bas
 }
 
 template <typename T>
-std::string CarafeBase64::decode(const T& inputBuffer, const Base64Charset &charset) {
+std::string Base64::decode(const T& inputBuffer, const Base64Charset &charset) {
     return decode(inputBuffer, inputBuffer.size(), charset);
 }
 
 // End public domain Base64
 
-// CarafeURLSafe
-std::string CarafeURLSafe::encode(const char *s) { std::string s2 = s; return encode(s2); }
-std::string CarafeURLSafe::encode(const std::string &s) {
+// URLSafe
+std::string URLSafe::encode(const char *s) { std::string s2 = s; return encode(s2); }
+std::string URLSafe::encode(const std::string &s) {
     std::string r;
     for(unsigned char c : s) {
         if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '.' || c == '-' || c == '_' || c == '~') {
@@ -316,8 +318,8 @@ std::string CarafeURLSafe::encode(const std::string &s) {
     return r;
 }
 
-std::string CarafeURLSafe::decode(const char *s) { std::string s2 = s; return decode(s2); }
-std::string CarafeURLSafe::decode(const std::string &s) {
+std::string URLSafe::decode(const char *s) { std::string s2 = s; return decode(s2); }
+std::string URLSafe::decode(const std::string &s) {
     std::string r;
     for(size_t i = 0; i < s.size(); i++) {
         std::array<char, 3> hex;
@@ -341,10 +343,10 @@ std::string CarafeURLSafe::decode(const std::string &s) {
     return r;
 }
 
-// CarafeHex
-std::string CarafeHex::encode(const std::string &str) { return encode(str.data(), str.size()); }
-std::string CarafeHex::encode(const char *s) { return encode(s, strlen(s)); }
-std::string CarafeHex::encode(const char *s, size_t len) {
+// Hex
+std::string Hex::encode(const std::string &str) { return encode(str.data(), str.size()); }
+std::string Hex::encode(const char *s) { return encode(s, strlen(s)); }
+std::string Hex::encode(const char *s, size_t len) {
     std::string r;
     r.reserve(len * 2);
     for(size_t i = 0; i < len; i++) {
@@ -356,9 +358,9 @@ std::string CarafeHex::encode(const char *s, size_t len) {
     return r;
 }
 
-std::string CarafeHex::decode(const std::string &str) { return decode(str.data(), str.size()); }
-std::string CarafeHex::decode(const char *s) { return decode(s, strlen(s)); }
-std::string CarafeHex::decode(const char *s, size_t len) {
+std::string Hex::decode(const std::string &str) { return decode(str.data(), str.size()); }
+std::string Hex::decode(const char *s) { return decode(s, strlen(s)); }
+std::string Hex::decode(const char *s, size_t len) {
     if (len % 2 != 0) throw std::out_of_range("Invalid hex encoding");
     std::string r;
     std::array<char, 3> hex;
@@ -379,8 +381,8 @@ std::string CarafeHex::decode(const char *s, size_t len) {
     return r;
 }
 
-// CarafeCookiesBase
-bool CarafeCookiesBase::case_insensitive_equals(const std::string &a, const char *s) {
+// CookiesBase
+bool CookiesBase::case_insensitive_equals(const std::string &a, const char *s) {
     if (!s) return false;
     size_t slen = strlen(s);
     if (a.size() != slen) return false;
@@ -393,7 +395,7 @@ bool CarafeCookiesBase::case_insensitive_equals(const std::string &a, const char
 }
 
 // We do our best, but surely there are cookies we can't parse.
-void CarafeCookiesBase::load_data(const std::string &d) {
+void CookiesBase::load_data(const std::string &d) {
     std::string::size_type start = 0;
     std::string key, val;
     while(start != std::string::npos && start < d.size()) {
@@ -425,8 +427,8 @@ void CarafeCookiesBase::load_data(const std::string &d) {
             } else if (case_insensitive_equals(key, "domain")) {
                 kv["domain"] = val;
             } else {
-                key = CarafeURLSafe::decode(key);
-                val = CarafeURLSafe::decode(val);
+                key = URLSafe::decode(key);
+                val = URLSafe::decode(val);
                 if (key.size() || val.size()) kv[key] = val; // key can be "", weird huh?
             }
         }
@@ -434,26 +436,26 @@ void CarafeCookiesBase::load_data(const std::string &d) {
     }
 }
 
-CarafeCookiesBase::CarafeCookiesBase() {}
-CarafeCookiesBase::CarafeCookiesBase(const std::string &d) {
+CookiesBase::CookiesBase() {}
+CookiesBase::CookiesBase(const std::string &d) {
     load_data(d);
 }
 
-CarafeCookieMap &CarafeCookiesBase::CarafeCookiesBase::key_value() { return kv; }
+CookieMap &CookiesBase::CookiesBase::key_value() { return kv; }
 
-void CarafeCookiesBase::erase() {
+void CookiesBase::erase() {
     kv.erase(kv.begin(), kv.end());
     flag_secure = false;
     flag_httponly = false;
 }
 
-std::string CarafeCookiesBase::serialize() {
+std::string CookiesBase::serialize() {
     std::string s;
     for(const auto &i : kv) {
         if (!i.first.size() && !i.second.size()) continue;
-        s += CarafeURLSafe::encode(i.first);
+        s += URLSafe::encode(i.first);
         s += '=';
-        s += CarafeURLSafe::encode(i.second);
+        s += URLSafe::encode(i.second);
         s += ';';
         s += ' ';
     }
@@ -466,8 +468,8 @@ std::string CarafeCookiesBase::serialize() {
     return s;
 }
 
-// CarafeRandom
-void CarafeRandom::fill(char *buf, size_t len) {
+// Random
+void Random::fill(char *buf, size_t len) {
 #if defined(HAVE_ARC4RANDOM_BUF)
     // Documented as "always successful".
     arc4random_buf(buf, len);
@@ -502,25 +504,25 @@ void CarafeRandom::fill(char *buf, size_t len) {
 }
 
 template <typename T>
-void CarafeRandom::fill(T in) {
+void Random::fill(T in) {
     fill(in.data(), in.size());
 }
 
-std::string CarafeRandom::get(size_t size) {
+std::string Random::get(size_t size) {
     char temp[size];
     fill(temp, size);
     return std::string(temp, size);
 }
 
-std::string CarafeRandom::get_base64(size_t size) {
+std::string Random::get_base64(size_t size) {
     std::vector<char> temp;
     temp.resize(size);
     fill(temp);
-    return CarafeBase64::encode(temp);
+    return Base64::encode(temp);
 }
 
 // uuid v4
-std::string CarafeRandom::uuid() {
+std::string Random::uuid() {
     std::array<char, 16> buf;
     fill(buf);
     char &version = buf[6];
@@ -531,52 +533,52 @@ std::string CarafeRandom::uuid() {
     variant |= 0b10000000;
     std::string r;
     r.reserve(36);
-    r += CarafeHex::encode(buf.data(), 4);
+    r += Hex::encode(buf.data(), 4);
     r += '-';
-    r += CarafeHex::encode(&buf.at(4), 2);
+    r += Hex::encode(&buf.at(4), 2);
     r += '-';
-    r += CarafeHex::encode(&buf.at(6), 2);
+    r += Hex::encode(&buf.at(6), 2);
     r += '-';
-    r += CarafeHex::encode(&buf.at(8), 2);
+    r += Hex::encode(&buf.at(8), 2);
     r += '-';
-    r += CarafeHex::encode(&buf.at(10), 6);
+    r += Hex::encode(&buf.at(10), 6);
     return r;
 }
 
 #ifdef CARAFE_AUTHENTICATED_COOKIES
-// CarafeSecureKey
-void CarafeSecureKey::precompute_state(const char *key, const size_t len) {
+// SecureKey
+void SecureKey::precompute_state(const char *key, const size_t len) {
     sha_init(precomputed_key_state);
     if (len < 16 || len > UINT32_MAX) throw std::runtime_error("key.size() < 16 or > UINT32_MAX");
     sha_process(precomputed_key_state, key, static_cast<u32>(len));
 }
 
-void CarafeSecureKey::rekey(const std::string &s) {
+void SecureKey::rekey(const std::string &s) {
     precompute_state(s.data(), s.size());
 }
 
-void CarafeSecureKey::rekey(void) {
+void SecureKey::rekey(void) {
     std::array<char, DEFAULT_KEY_SIZE> out;
-    CarafeRandom::fill(out);
+    Random::fill(out);
     precompute_state(out.data(), out.size());
 }
 
-CarafeSecureKey::CarafeSecureKey() {
+SecureKey::SecureKey() {
     rekey();
 };
 
-CarafeSecureKey::CarafeSecureKey(const std::string &s) {
+SecureKey::SecureKey(const std::string &s) {
     rekey(s);
 }
 
-void CarafeSecureKey::get_keyed_state(sha512_state &dest) const {
+void SecureKey::get_keyed_state(sha512_state &dest) const {
     memcpy(&dest, &precomputed_key_state, sizeof(precomputed_key_state));
 }
 
-// CarafeAuthenticatedCookieAuthenticator
-CarafeAuthenticatedCookieAuthenticator::CarafeAuthenticatedCookieAuthenticator(const CarafeSecureKey &k) : key(k) {}
+// AuthenticatedCookieAuthenticator
+AuthenticatedCookieAuthenticator::AuthenticatedCookieAuthenticator(const SecureKey &k) : key(k) {}
 
-const std::string &CarafeAuthenticatedCookieAuthenticator::compute_from_string(const std::string &in) {
+const std::string &AuthenticatedCookieAuthenticator::compute_from_string(const std::string &in) {
     sha512_state s;
     std::array<char, SHA512_OUTPUT_SIZE> out;
 
@@ -587,31 +589,31 @@ const std::string &CarafeAuthenticatedCookieAuthenticator::compute_from_string(c
     sha_process(s, in.data(), static_cast<u32>(in.size()));
     sha_done(s, out.data());
 
-    mac = CarafeBase64::encode(out, out.size());
+    mac = Base64::encode(out, out.size());
     return mac;
 }
 
-const std::string &CarafeAuthenticatedCookieAuthenticator::to_string() const {
-    if (mac.size() == 0) throw std::runtime_error("This CarafeAuthenticatedCookieAuthenticator not initialized");
+const std::string &AuthenticatedCookieAuthenticator::to_string() const {
+    if (mac.size() == 0) throw std::runtime_error("This AuthenticatedCookieAuthenticator not initialized");
     return mac;
 }
 
-void CarafeAuthenticatedCookieAuthenticator::load_from_safebase64(const std::string &in) {
+void AuthenticatedCookieAuthenticator::load_from_safebase64(const std::string &in) {
     if (in.size() != (SHA512_OUTPUT_SIZE * 3 / 4)) throw std::runtime_error("Invalid input");
     mac = in;
 }
 
-bool CarafeAuthenticatedCookieAuthenticator::operator==(const CarafeAuthenticatedCookieAuthenticator &b) const {
+bool AuthenticatedCookieAuthenticator::operator==(const AuthenticatedCookieAuthenticator &b) const {
     return this->safe_equals(b.mac);
 }
 
-bool CarafeAuthenticatedCookieAuthenticator::operator!=(const CarafeAuthenticatedCookieAuthenticator &b) const {
+bool AuthenticatedCookieAuthenticator::operator!=(const AuthenticatedCookieAuthenticator &b) const {
     return !(this->safe_equals(b.mac));
 }
 
-bool CarafeAuthenticatedCookieAuthenticator::safe_equals(const std::string &b) const {
+bool AuthenticatedCookieAuthenticator::safe_equals(const std::string &b) const {
     unsigned char t = 0;
-    if (mac.size() == 0) throw std::runtime_error("This CarafeAuthenticatedCookieAuthenticator not initialized");
+    if (mac.size() == 0) throw std::runtime_error("This AuthenticatedCookieAuthenticator not initialized");
     if (mac.size() != b.size()) return false;
     for (size_t i = 0; i < mac.size(); i++) {
         t |= mac.at(i) ^ b.at(i);
@@ -619,43 +621,43 @@ bool CarafeAuthenticatedCookieAuthenticator::safe_equals(const std::string &b) c
     return t == 0;
 }
 
-// CarafeCookieKeyManager
-void CarafeCookieKeyManager::Spinlock::lock() { while(flag.test_and_set()); }
-void CarafeCookieKeyManager::Spinlock::unlock() { flag.clear(); }
+// CookieKeyManager
+void CookieKeyManager::Spinlock::lock() { while(flag.test_and_set()); }
+void CookieKeyManager::Spinlock::unlock() { flag.clear(); }
 
-CarafeCookieKeyManager::CarafeCookieKeyManager() {};
-CarafeCookieKeyManager::CarafeCookieKeyManager(const std::string &key) : encrypt_key(key) {};
+CookieKeyManager::CookieKeyManager() {};
+CookieKeyManager::CookieKeyManager(const std::string &key) : encrypt_key(key) {};
 
-CarafeCookieKeyManagerID CarafeCookieKeyManager::add_decrypt_key_no_lock(const CarafeSecureKey &new_key) {
-    CarafeCookieKeyManagerID this_id;
+CookieKeyManagerID CookieKeyManager::add_decrypt_key_no_lock(const SecureKey &new_key) {
+    CookieKeyManagerID this_id;
     do {
-        CarafeRandom::fill(reinterpret_cast<char *>(&this_id), sizeof(this_id));
+        Random::fill(reinterpret_cast<char *>(&this_id), sizeof(this_id));
     } while (decrypt_keys.count(this_id));
     decrypt_keys[this_id] = { new_key, std::chrono::system_clock::now() };
     return this_id;
 }
 
-CarafeCookieKeyManagerID CarafeCookieKeyManager::add_decrypt_key(const CarafeSecureKey &new_key) {
+CookieKeyManagerID CookieKeyManager::add_decrypt_key(const SecureKey &new_key) {
     std::lock_guard<Spinlock> dlock(decrypt_key_lock);
     return add_decrypt_key_no_lock(new_key);
 }
 
-bool CarafeCookieKeyManager::remove_decrypt_key(const CarafeCookieKeyManagerID id) {
+bool CookieKeyManager::remove_decrypt_key(const CookieKeyManagerID id) {
     std::lock_guard<Spinlock> dlock(decrypt_key_lock);
     return decrypt_keys.erase(id);
 }
 
-bool CarafeCookieKeyManager::has_decrypt_key(const CarafeCookieKeyManagerID id) const {
+bool CookieKeyManager::has_decrypt_key(const CookieKeyManagerID id) const {
     std::lock_guard<Spinlock> dlock(decrypt_key_lock);
     return decrypt_keys.count(id);
 }
 
-size_t CarafeCookieKeyManager::decrypt_key_count() const {
+size_t CookieKeyManager::decrypt_key_count() const {
     std::lock_guard<Spinlock> dlock(decrypt_key_lock);
     return decrypt_keys.size();
 }
 
-void CarafeCookieKeyManager::expire_old_decrypt_keys(const std::chrono::seconds age) {
+void CookieKeyManager::expire_old_decrypt_keys(const std::chrono::seconds age) {
     auto now = std::chrono::system_clock::now();
     std::lock_guard<Spinlock> dlock(decrypt_key_lock);
 
@@ -669,12 +671,12 @@ void CarafeCookieKeyManager::expire_old_decrypt_keys(const std::chrono::seconds 
     }
 }
 
-CarafeSecureKey CarafeCookieKeyManager::get_encrypt_key() const { // Important this returns a copy.
+SecureKey CookieKeyManager::get_encrypt_key() const { // Important this returns a copy.
     std::lock_guard<Spinlock> elock(encrypt_key_lock);
     return encrypt_key;
 }
 
-CarafeCookieKeyManagerID CarafeCookieKeyManager::set_encrypt_key(const std::string &new_key) {
+CookieKeyManagerID CookieKeyManager::set_encrypt_key(const std::string &new_key) {
     // Order is important
     std::lock_guard<Spinlock> elock(encrypt_key_lock);
     std::lock_guard<Spinlock> dlock(decrypt_key_lock);
@@ -684,7 +686,7 @@ CarafeCookieKeyManagerID CarafeCookieKeyManager::set_encrypt_key(const std::stri
     return r;
 }
 
-CarafeCookieKeyManagerID CarafeCookieKeyManager::generate_new_encrypt_key() {
+CookieKeyManagerID CookieKeyManager::generate_new_encrypt_key() {
     // Order is important
     std::lock_guard<Spinlock> elock(encrypt_key_lock);
     std::lock_guard<Spinlock> dlock(decrypt_key_lock);
@@ -694,25 +696,25 @@ CarafeCookieKeyManagerID CarafeCookieKeyManager::generate_new_encrypt_key() {
     return r;
 }
 
-CarafeAuthenticatedCookieAuthenticator CarafeCookieKeyManager::compute(const std::string &data) const {
+AuthenticatedCookieAuthenticator CookieKeyManager::compute(const std::string &data) const {
     std::lock_guard<Spinlock> elock(encrypt_key_lock);
-    CarafeAuthenticatedCookieAuthenticator csca(encrypt_key);
+    AuthenticatedCookieAuthenticator csca(encrypt_key);
     csca.compute_from_string(data);
     return csca;
 }
 
-// CarafeCookieKeyManager
-bool CarafeCookieKeyManager::check_valid(const std::string &data, const std::string &check_me) const {
+// CookieKeyManager
+bool CookieKeyManager::check_valid(const std::string &data, const std::string &check_me) const {
     {
         std::lock_guard<Spinlock> elock(encrypt_key_lock);
-        CarafeAuthenticatedCookieAuthenticator csca(encrypt_key);
+        AuthenticatedCookieAuthenticator csca(encrypt_key);
         csca.compute_from_string(data);
         if (csca.safe_equals(check_me)) return true;
     }
 
     std::lock_guard<Spinlock> dlock(decrypt_key_lock);
     for(const auto &key : decrypt_keys) {
-        CarafeAuthenticatedCookieAuthenticator csca(key.second.key);
+        AuthenticatedCookieAuthenticator csca(key.second.key);
         csca.compute_from_string(data);
         if (csca.safe_equals(check_me)) return true;
     }
@@ -720,29 +722,29 @@ bool CarafeCookieKeyManager::check_valid(const std::string &data, const std::str
     return false;
 }
 
-// CarafeAuthenticatedCookies
-const std::string CarafeAuthenticatedCookies::TIMESTAMP_KEY = "_ts";
-CarafeAuthenticatedCookies::CarafeAuthenticatedCookies(const CarafeCookieKeyManager &km, const std::chrono::seconds age) :
-    CarafeCookiesBase(), cookie_keys(km), max_age(age) {}
-CarafeAuthenticatedCookies::CarafeAuthenticatedCookies(const CarafeCookieKeyManager &km, const std::string &d) :
-    CarafeCookiesBase(), cookie_keys(km), max_age(age) {
+// AuthenticatedCookies
+const std::string AuthenticatedCookies::TIMESTAMP_KEY = "_ts";
+AuthenticatedCookies::AuthenticatedCookies(const CookieKeyManager &km, const std::chrono::seconds age) :
+    CookiesBase(), cookie_keys(km), max_age(age) {}
+AuthenticatedCookies::AuthenticatedCookies(const CookieKeyManager &km, const std::string &d) :
+    CookiesBase(), cookie_keys(km), max_age(age) {
     load_data(d);
 }
 
-bool CarafeAuthenticatedCookies::load_data(const std::string &d) {
-    // The mac is the CarafeAuthenticatedCookieAuthenticator::ENCODED_SIZE bytes at the
+bool AuthenticatedCookies::load_data(const std::string &d) {
+    // The mac is the AuthenticatedCookieAuthenticator::ENCODED_SIZE bytes at the
     // end, and we know there must be some data (at least the TIMESTAMP_KEY).
-    if (d.size() <= CarafeAuthenticatedCookieAuthenticator::ENCODED_SIZE) return false;
+    if (d.size() <= AuthenticatedCookieAuthenticator::ENCODED_SIZE) return false;
 
-    std::string mac = d.substr(d.size() - CarafeAuthenticatedCookieAuthenticator::ENCODED_SIZE, CarafeAuthenticatedCookieAuthenticator::ENCODED_SIZE);
-    std::string data = d.substr(0, d.size() - CarafeAuthenticatedCookieAuthenticator::ENCODED_SIZE);
+    std::string mac = d.substr(d.size() - AuthenticatedCookieAuthenticator::ENCODED_SIZE, AuthenticatedCookieAuthenticator::ENCODED_SIZE);
+    std::string data = d.substr(0, d.size() - AuthenticatedCookieAuthenticator::ENCODED_SIZE);
 
     if (!cookie_keys.check_valid(data, mac)) {
         return false;
     }
 
-    data = CarafeBase64::decode(data);
-    CarafeCookiesBase::load_data(data);
+    data = Base64::decode(data);
+    CookiesBase::load_data(data);
 
     // The timestamp is added automatically, if it's not there something went wrong.
     if (!key_value().count(TIMESTAMP_KEY)) {
@@ -757,15 +759,15 @@ bool CarafeAuthenticatedCookies::load_data(const std::string &d) {
     return true;
 }
 
-CarafeCookieMap &CarafeAuthenticatedCookies::key_value() { return CarafeCookiesBase::kv; }
-void CarafeAuthenticatedCookies::erase() { CarafeCookiesBase::erase(); }
-bool CarafeAuthenticatedCookies::authenticated() { return auth_valid; }
+CookieMap &AuthenticatedCookies::key_value() { return CookiesBase::kv; }
+void AuthenticatedCookies::erase() { CookiesBase::erase(); }
+bool AuthenticatedCookies::authenticated() { return auth_valid; }
 
-std::string CarafeAuthenticatedCookies::serialize() {
-    CarafeCookiesBase::kv[TIMESTAMP_KEY] = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+std::string AuthenticatedCookies::serialize() {
+    CookiesBase::kv[TIMESTAMP_KEY] = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 
-    std::string s = CarafeBase64::encode(CarafeCookiesBase::serialize());
-    CarafeAuthenticatedCookieAuthenticator mac = cookie_keys.compute(s);
+    std::string s = Base64::encode(CookiesBase::serialize());
+    AuthenticatedCookieAuthenticator mac = cookie_keys.compute(s);
     return s + mac.to_string();
 }
 #endif // CARAFE_AUTHENTICATED_COOKIES
@@ -785,20 +787,20 @@ MHD_FLAG operator~(const MHD_FLAG a) {
     return static_cast<MHD_FLAG>(~(static_cast<unsigned int>(a)));
 }
 
-CarafeHTTPMethods operator|(const CarafeHTTPMethods a, const CarafeHTTPMethods b) {
-    return static_cast<CarafeHTTPMethods>(static_cast<int>(a) | static_cast<int>(b));
+HTTPMethods operator|(const HTTPMethods a, const HTTPMethods b) {
+    return static_cast<HTTPMethods>(static_cast<int>(a) | static_cast<int>(b));
 }
 
-CarafeHTTPMethods operator&(const CarafeHTTPMethods a, const CarafeHTTPMethods b) {
-    return static_cast<CarafeHTTPMethods>(static_cast<int>(a) & static_cast<int>(b));
+HTTPMethods operator&(const HTTPMethods a, const HTTPMethods b) {
+    return static_cast<HTTPMethods>(static_cast<int>(a) & static_cast<int>(b));
 }
 
-CarafeHTTPMethods operator~(const CarafeHTTPMethods a) {
-    return static_cast<CarafeHTTPMethods>(~(static_cast<int>(a)));
+HTTPMethods operator~(const HTTPMethods a) {
+    return static_cast<HTTPMethods>(~(static_cast<int>(a)));
 }
 
-// CarafeRouteCallbackInfo
-CarafeRouteCallbackInfo::CarafeRouteCallbackInfo(const std::string &r, CarafeHTTPMethod m, CarafeRouteCallback cb) : route(r), callback(cb), allowed_methods(m) {
+// RouteCallbackInfo
+RouteCallbackInfo::RouteCallbackInfo(const std::string &r, HTTPMethod m, RouteCallback cb) : route(r), callback(cb), allowed_methods(m) {
     std::string this_arg;
     std::string this_arg_type;
     enum processing_step { ARG_NAME, ARG_TYPE, ARG_DONE };
@@ -854,42 +856,42 @@ CarafeRouteCallbackInfo::CarafeRouteCallbackInfo(const std::string &r, CarafeHTT
     }
 }
 
-// CarafeRequestPostData
-CarafeRequestPostData::CarafeRequestPostData(const char *d, const char *f) : data(d), filename(f) {};
+// RequestPostData
+RequestPostData::RequestPostData(const char *d, const char *f) : data(d), filename(f) {};
 
-// CarafeResponse
-CarafeResponse::CarafeResponse() : code(500) {};
-void CarafeResponse::reset() {
+// Response
+Response::Response() : code(500) {};
+void Response::reset() {
     cookies.erase();
     headers.erase(headers.begin(), headers.end());
     code = 500;
 }
 
-// CarafeRequestConnectionValues
-CarafeRequestConnectionValues::CarafeRequestConnectionValues(CarafeRequest &r, ValueType vt, size_t ms, size_t &shared_arg_size) :
+// RequestConnectionValues
+RequestConnectionValues::RequestConnectionValues(Request &r, ValueType vt, size_t ms, size_t &shared_arg_size) :
     req(r), my_type(vt), current_size(shared_arg_size), max_size(ms), all_args_populated(false)
 {}
 
 // This could be a string_view, but would be the only thing requiring C++17 support.
-const std::string &CarafeRequestConnectionValues::get(const std::string &key) {
+const std::string &RequestConnectionValues::get(const std::string &key) {
     if (!all_args_populated) load_all();
     auto f = all_args.find(key);
     if (f == all_args.end()) return no_value;
     return f->second;
 }
 
-CarafeRequestStringMap::iterator CarafeRequestConnectionValues::begin() {
+RequestStringMap::iterator RequestConnectionValues::begin() {
     if (!all_args_populated) load_all();
     return all_args.begin();
 }
 
-CarafeRequestStringMap::iterator CarafeRequestConnectionValues::end() {
+RequestStringMap::iterator RequestConnectionValues::end() {
     if (!all_args_populated) load_all();
     return all_args.end();
 }
 
-// CarafeRequest
-bool CarafeRequest::case_insensitive_equals(const char *a, const char *b) {
+// Request
+bool Request::case_insensitive_equals(const char *a, const char *b) {
     size_t i;
     for(i = 0; a[i] != '\0' || b[i] != '\0'; i++) {
         if ((a[i] & 0x7F) != (b[i] & 0x7F)) return false;
@@ -897,7 +899,7 @@ bool CarafeRequest::case_insensitive_equals(const char *a, const char *b) {
     return a[i] == b[i];
 }
 
-CarafeRequest::CarafeRequest(struct MHD_Connection *c, const char *m, const char *v, const char *u, size_t max_up, size_t max_header, void *ctx) :
+Request::Request(struct MHD_Connection *c, const char *m, const char *v, const char *u, size_t max_up, size_t max_header, void *ctx) :
     connection(c),
     post_processor(nullptr),
     total_post_data_size(0),
@@ -907,15 +909,15 @@ CarafeRequest::CarafeRequest(struct MHD_Connection *c, const char *m, const char
     version(v),
     path(u),
     method(method_to_int(m)),
-    args(*this, CarafeRequestConnectionValues::ARGS, max_header, current_arg_size),
-    headers(*this, CarafeRequestConnectionValues::HEADERS, max_header, current_arg_size),
+    args(*this, RequestConnectionValues::ARGS, max_header, current_arg_size),
+    headers(*this, RequestConnectionValues::HEADERS, max_header, current_arg_size),
     context(ctx)
 {
     if (!connection) throw std::runtime_error("connection is null");
     if (headers.get("cookie").size()) cookies.load_data(headers.get("cookie"));
 };
 
-const std::string &CarafeRequest::client_ip() {
+const std::string &Request::client_ip() {
     if (!client_ip_str.size()) {
         std::array<char, INET6_ADDRSTRLEN + 1> dest;
         const union MHD_ConnectionInfo *info = MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
@@ -935,35 +937,34 @@ const std::string &CarafeRequest::client_ip() {
     return client_ip_str;
 }
 
-CarafeHTTPMethod CarafeRequest::method_to_int(const char *method) {
-    if (!method) return CarafeHTTPMethods::UNKNOWN;
+HTTPMethod Request::method_to_int(const char *method) {
+    if (!method) return HTTPMethods::UNKNOWN;
     if (case_insensitive_equals(method, "GET")) {
-        return CarafeHTTPMethods::GET;
+        return HTTPMethods::GET;
     } else if (case_insensitive_equals(method, "POST")) {
-        return CarafeHTTPMethods::POST;
+        return HTTPMethods::POST;
     } else if (case_insensitive_equals(method, "PURGE")) {
-        return CarafeHTTPMethods::PURGE;
+        return HTTPMethods::PURGE;
     } else if (case_insensitive_equals(method, "PUT")) {
-        return CarafeHTTPMethods::PUT;
+        return HTTPMethods::PUT;
     } else if (case_insensitive_equals(method, "DELETE")) {
-        return CarafeHTTPMethods::DELETE;
+        return HTTPMethods::DELETE;
     } else if (case_insensitive_equals(method, "HEAD")) {
-        return CarafeHTTPMethods::HEAD;
+        return HTTPMethods::HEAD;
     } else if (case_insensitive_equals(method, "CONNECT")) {
-        return CarafeHTTPMethods::CONNECT;
+        return HTTPMethods::CONNECT;
     } else if (case_insensitive_equals(method, "OPTIONS")) {
-        return CarafeHTTPMethods::OPTIONS;
+        return HTTPMethods::OPTIONS;
     } else if (case_insensitive_equals(method, "TRACE")) {
-        return CarafeHTTPMethods::TRACE;
+        return HTTPMethods::TRACE;
     } else if (case_insensitive_equals(method, "PATCH")) {
-        return CarafeHTTPMethods::PATCH;
+        return HTTPMethods::PATCH;
     }
-    return CarafeHTTPMethods::UNKNOWN;
+    return HTTPMethods::UNKNOWN;
 }
 
-// CarafeHTTPD
-
-CarafeHTTPD::CarafeHTTPD(uint_fast16_t p) :
+// HTTPD
+HTTPD::HTTPD(uint_fast16_t p) :
     listen_port(p),
     daemon(nullptr),
     daemon6(nullptr),
@@ -977,7 +978,7 @@ CarafeHTTPD::CarafeHTTPD(uint_fast16_t p) :
     context(nullptr)
     {};
 
-int CarafeHTTPD::mhd_handler(void *microhttpd_ptr,
+int HTTPD::mhd_handler(void *microhttpd_ptr,
                        struct MHD_Connection *connection,
                        const char *url,
                        const char *method,
@@ -986,10 +987,10 @@ int CarafeHTTPD::mhd_handler(void *microhttpd_ptr,
                        size_t *upload_data_size,
                        void **context_data) {
     if (!microhttpd_ptr || !connection || !url || !method || !version || !upload_data_size) return MHD_NO;
-    CarafeHTTPD *chd = static_cast<CarafeHTTPD *>(microhttpd_ptr);
+    HTTPD *chd = static_cast<HTTPD *>(microhttpd_ptr);
 
     if (!*context_data) { // Phase 1
-        CarafeRequest *request = new (std::nothrow) CarafeRequest(connection, method, version, url, chd->max_upload_size, chd->max_header_size, chd->context);
+        Request *request = new (std::nothrow) Request(connection, method, version, url, chd->max_upload_size, chd->max_header_size, chd->context);
         if (!request) return MHD_NO;
         *context_data = request;
         return MHD_YES;
@@ -997,9 +998,9 @@ int CarafeHTTPD::mhd_handler(void *microhttpd_ptr,
 
     // Phase 2
     if (!*context_data) return MHD_NO;
-    CarafeRequest *request = static_cast<CarafeRequest *>(*context_data);
+    Request *request = static_cast<Request *>(*context_data);
 
-    if (request->method == CarafeHTTPMethods::POST) {
+    if (request->method == HTTPMethods::POST) {
         request->post_processor = MHD_create_post_processor(connection, 65536, &mhd_post_iterator, request);
         if (!request->post_processor) {
             delete request;
@@ -1007,7 +1008,7 @@ int CarafeHTTPD::mhd_handler(void *microhttpd_ptr,
         }
     }
 
-    if (request->method == CarafeHTTPMethods::POST && *upload_data_size) {
+    if (request->method == HTTPMethods::POST && *upload_data_size) {
         MHD_post_process(request->post_processor, upload_data, *upload_data_size);
         *upload_data_size = 0;
         return MHD_YES;
@@ -1016,7 +1017,7 @@ int CarafeHTTPD::mhd_handler(void *microhttpd_ptr,
     // Phase 2 or 3 depending on if this is a POST with data or not.
     if (request->post_processor) MHD_destroy_post_processor(request->post_processor);
 
-    CarafeResponse response;
+    Response response;
     *context_data = NULL;
 
     try {
@@ -1064,9 +1065,9 @@ int CarafeHTTPD::mhd_handler(void *microhttpd_ptr,
     return ret;
 }
 
-int CarafeHTTPD::mhd_header_parse(void *map_ptr, enum MHD_ValueKind kind, const char *key, const char *value) {
+int HTTPD::mhd_header_parse(void *map_ptr, enum MHD_ValueKind kind, const char *key, const char *value) {
     if (!map_ptr || !key) return MHD_NO;
-    CarafeRequestConnectionValues *values = static_cast<CarafeRequestConnectionValues *>(map_ptr);
+    RequestConnectionValues *values = static_cast<RequestConnectionValues *>(map_ptr);
     if (*key == '\0' && value && *value == '\0') return MHD_YES; // I don't know why all empty values show up but we don't want them.
 
     std::string key_lc = key;
@@ -1090,7 +1091,7 @@ int CarafeHTTPD::mhd_header_parse(void *map_ptr, enum MHD_ValueKind kind, const 
     return MHD_YES;
 }
 
-int CarafeHTTPD::mhd_post_iterator(void *microhttpd_req_ptr,
+int HTTPD::mhd_post_iterator(void *microhttpd_req_ptr,
                              enum MHD_ValueKind kind,
                              const char *key,
                              const char *filename,
@@ -1100,7 +1101,7 @@ int CarafeHTTPD::mhd_post_iterator(void *microhttpd_req_ptr,
                              uint64_t off,
                              size_t size) {
     if (kind != MHD_POSTDATA_KIND || !microhttpd_req_ptr || !key) return MHD_NO;
-    CarafeRequest *request = static_cast<CarafeRequest *>(microhttpd_req_ptr);
+    Request *request = static_cast<Request *>(microhttpd_req_ptr);
 
     request->total_post_data_size += size;
     if (request->total_post_data_size > request->max_upload_size) return MHD_NO;
@@ -1123,21 +1124,21 @@ int CarafeHTTPD::mhd_post_iterator(void *microhttpd_req_ptr,
     return MHD_YES;
 }
 
-void CarafeHTTPD::sort_routes() {
+void HTTPD::sort_routes() {
     struct {
-        bool operator()(CarafeRouteCallbackInfo &a, CarafeRouteCallbackInfo &b) const {
+        bool operator()(RouteCallbackInfo &a, RouteCallbackInfo &b) const {
             return a.route_re.size() < b.route_re.size();
         }
     } sorter;
     std::sort(routes.begin(), routes.end(), sorter);
 }
 
-CarafeHTTPD::~CarafeHTTPD() noexcept {
+HTTPD::~HTTPD() noexcept {
     MHD_stop_daemon(daemon);
     if (dual_stack) MHD_stop_daemon(daemon6);
 }
 
-void CarafeHTTPD::run() {
+void HTTPD::run() {
     sort_routes();
 
     struct MHD_OptionItem ops[] = {
@@ -1183,14 +1184,14 @@ void CarafeHTTPD::run() {
     if (dual_stack) MHD_run(daemon6);
 }
 
-void CarafeHTTPD::run_forever() {
+void HTTPD::run_forever() {
     run();
     while (keep_running) {
         sleep(1);
     }
 }
 
-std::string CarafeHTTPD::generate_access_log(CarafeRequest &request, CarafeResponse &response, const char *method) {
+std::string HTTPD::generate_access_log(Request &request, Response &response, const char *method) {
     std::array<char, 27> date_buf;
     std::time_t t = std::time(nullptr);
     std::strftime(date_buf.data(), date_buf.size(), "%d/%b/%Y:%H:%M:%S %z", std::localtime(&t));
@@ -1211,18 +1212,18 @@ std::string CarafeHTTPD::generate_access_log(CarafeRequest &request, CarafeRespo
     return log_message;
 }
 
-void CarafeHTTPD::add_route(const char *route, const CarafeHTTPMethod methods, const CarafeRouteCallback &callback) {
-    CarafeRouteCallbackInfo ci(route, methods, callback);
+void HTTPD::add_route(const char *route, const HTTPMethod methods, const RouteCallback &callback) {
+    RouteCallbackInfo ci(route, methods, callback);
     routes.emplace_back(std::move(ci));
 }
 
-void CarafeHTTPD::add_route(const std::string &route, const CarafeHTTPMethod methods, const CarafeRouteCallback &callback) {
+void HTTPD::add_route(const std::string &route, const HTTPMethod methods, const RouteCallback &callback) {
     add_route(route.c_str(), methods, callback);
 }
 
-void CarafeHTTPD::handle_route(CarafeRequest &request, CarafeResponse &response, const char *method) {
+void HTTPD::handle_route(Request &request, Response &response, const char *method) {
     std::smatch arg_matches;
-    CarafeHTTPMethod method_int = CarafeRequest::method_to_int(method);
+    HTTPMethod method_int = Request::method_to_int(method);
     for(auto &route : routes) {
         if (std::regex_match(request.path, arg_matches, route.re) && (method_int & route.allowed_methods)) {
             for(size_t i = 1 /* 0 is the whole string */; i < arg_matches.size(); i++) {
@@ -1235,21 +1236,21 @@ void CarafeHTTPD::handle_route(CarafeRequest &request, CarafeResponse &response,
     response.code = 404;
 }
 
-// CarafeRequestConnectionValues
-void CarafeRequestConnectionValues::load_all() {
+// RequestConnectionValues
+void RequestConnectionValues::load_all() {
     if (all_args_populated) return;
     switch (my_type) {
         case ARGS:
-            MHD_get_connection_values(req.connection, MHD_GET_ARGUMENT_KIND, CarafeHTTPD::mhd_header_parse, this);
-            MHD_get_connection_values(req.connection, MHD_POSTDATA_KIND, CarafeHTTPD::mhd_header_parse, this);
+            MHD_get_connection_values(req.connection, MHD_GET_ARGUMENT_KIND, HTTPD::mhd_header_parse, this);
+            MHD_get_connection_values(req.connection, MHD_POSTDATA_KIND, HTTPD::mhd_header_parse, this);
             break;
 
         case HEADERS:
-            MHD_get_connection_values(req.connection, MHD_HEADER_KIND, CarafeHTTPD::mhd_header_parse, this);
+            MHD_get_connection_values(req.connection, MHD_HEADER_KIND, HTTPD::mhd_header_parse, this);
             break;
 
         case COOKIES:
-            MHD_get_connection_values(req.connection, MHD_COOKIE_KIND, CarafeHTTPD::mhd_header_parse, this);
+            MHD_get_connection_values(req.connection, MHD_COOKIE_KIND, HTTPD::mhd_header_parse, this);
             break;
 
         default:
