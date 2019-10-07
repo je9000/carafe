@@ -5,7 +5,7 @@
 #include "carafe.hpp"
 
 #ifdef CARAFE_AUTHENTICATED_COOKIES
-Carafe::AuthenticatedKeyManager cm;
+Carafe::CookieKeyManager cm;
 Carafe::SecureKey mac_key("here's an example key, the real key should be more complex!");
 #endif
 
@@ -24,7 +24,7 @@ void test(Carafe::Request &request, Carafe::Response &response) {
         response.body += "\nAuthenticated cookie not found!\n";
     } else {
         response.body += "\nAuthenticated cookie:" + request.cookies.key_value().at("authenticated_cookies") + "\n";
-        auto auth = Carafe::AuthenticatedCookies(cm);
+        Carafe::AuthenticatedCookies auth(cm, std::chrono::duration_cast<std::chrono::seconds>(std::chrono::hours(24 * 7)));
         auth.load_data(request.cookies.key_value().at("authenticated_cookies"));
         if (!auth.authenticated()) {
             response.body += "\nAuthenticated cookie contents not valid!\n";
@@ -42,7 +42,7 @@ void var(Carafe::Request &request, Carafe::Response &response) {
     response.code = 200;
 
 #ifdef CARAFE_AUTHENTICATED_COOKIES
-    auto auth = Carafe::AuthenticatedCookies(cm);
+    Carafe::AuthenticatedCookies auth(cm);
     auth.key_value().emplace("authenticated_key", "authenticated_value");
     response.cookies.key_value().emplace("authenticated_cookies", auth.serialize());
 #endif
@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
 #ifdef CARAFE_AUTHENTICATED_COOKIES
     Carafe::CookieKeyManager ck("heres a long key");
     // Inner authenticated cookie
-    auto c = Carafe::AuthenticatedCookies(ck);
+    Carafe::AuthenticatedCookies c(ck);
     c.key_value().emplace("securekey1", "secureval1");
     c.key_value().emplace("securekey2", "secureval2");
 
@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
     c3.load_data(c2.serialize());
 
     // Innter authenticated cookie
-    auto c4 = Carafe::AuthenticatedCookies(ck);
+    Carafe::AuthenticatedCookies c4(ck);
     if (!c2.key_value().count("auth")) throw std::runtime_error("Couldn't extract secure cookies!");
     // If we didn't explicitely check above, could throw if "auth", the secure cookie, isn't found.
     c4.load_data(c2.key_value().at("auth"));

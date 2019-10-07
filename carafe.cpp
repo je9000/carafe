@@ -193,11 +193,11 @@ static void sha_done(sha512_state& md, void *out)
 // End public domain SHA2 implementation
 
 template <typename T>
-std::string Sha512::calculate(const T &s) {
-    return calculate(s.data(), s.size());
+std::string Sha512::compute(const T &s) {
+    return compute(s.data(), s.size());
 }
 
-std::string Sha512::calculate(const char *buf, size_t size) {
+std::string Sha512::compute(const char *buf, size_t size) {
     sha512_state s;
     std::array<char, SHA512_OUTPUT_SIZE> out;
 
@@ -211,12 +211,12 @@ std::string Sha512::calculate(const char *buf, size_t size) {
 // Based on public domain base64
 // Thanks https://en.wikibooks.org/wiki/Algorithm_Implementation/Miscellaneous/Base64#C++
 
-const Base64::Base64Charset Base64::CharsetStandard __attribute__((unused)) = {
+const Base64::Charset Base64::CharsetStandard {
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
     '='
 };
 
-const Base64::Base64Charset Base64::CharsetURLSafe {
+const Base64::Charset Base64::CharsetURLSafe {
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
     '.'
 };
@@ -225,14 +225,12 @@ const Base64::Base64Charset Base64::CharsetURLSafe {
 #error "Base64 routines only support little-endian architectures"
 #endif
 template <typename T>
-std::string Base64::encode(const T& inputBuffer, size_t in_size, const Base64Charset &charset)
-{
+std::string Base64::encode(const T& inputBuffer, size_t in_size, const Charset &charset) {
     std::string encodedString;
     encodedString.reserve(((in_size/3) + (in_size % 3 > 0)) * 4);
     uint32_t temp;
     auto cursor = inputBuffer.begin();
-    for(size_t idx = 0; idx < in_size/3; idx++)
-    {
+    for (size_t idx = 0; idx < in_size/3; idx++) {
         temp  = (*cursor++) << 16; //Convert to big endian
         temp += (*cursor++) << 8;
         temp += (*cursor++);
@@ -241,8 +239,7 @@ std::string Base64::encode(const T& inputBuffer, size_t in_size, const Base64Cha
         encodedString.append(1,charset.encodeLookup.at((temp & 0x00000FC0) >> 6 ));
         encodedString.append(1,charset.encodeLookup.at((temp & 0x0000003F)      ));
     }
-    switch(in_size % 3)
-    {
+    switch (in_size % 3) {
         case 1:
             temp  = (*cursor++) << 16; //Convert to big endian
             encodedString.append(1,charset.encodeLookup.at((temp & 0x00FC0000) >> 18));
@@ -262,12 +259,12 @@ std::string Base64::encode(const T& inputBuffer, size_t in_size, const Base64Cha
 }
 
 template <typename T>
-std::string Base64::encode(const T& inputBuffer, const Base64Charset &charset) {
+std::string Base64::encode(const T& inputBuffer, const Charset &charset) {
     return encode(inputBuffer, inputBuffer.size(), charset);
 }
 
 template <typename T>
-std::string Base64::decode(const T& inputBuffer, size_t in_size, const Base64Charset &charset) {
+std::string Base64::decode(const T& inputBuffer, size_t in_size, const Charset &charset) {
     uint_fast32_t leftover = 0;
     char i;
     std::string s;
@@ -295,14 +292,14 @@ std::string Base64::decode(const T& inputBuffer, size_t in_size, const Base64Cha
 }
 
 template <typename T>
-std::string Base64::decode(const T& inputBuffer, const Base64Charset &charset) {
+std::string Base64::decode(const T& inputBuffer, const Charset &charset) {
     return decode(inputBuffer, inputBuffer.size(), charset);
 }
 
 // End public domain Base64
 
 // URLSafe
-std::string URLSafe::encode(const char *s) { std::string s2 = s; return encode(s2); }
+std::string URLSafe::encode(const char *s) { return encode(std::string(s)); }
 std::string URLSafe::encode(const std::string &s) {
     std::string r;
     for(unsigned char c : s) {
@@ -318,7 +315,7 @@ std::string URLSafe::encode(const std::string &s) {
     return r;
 }
 
-std::string URLSafe::decode(const char *s) { std::string s2 = s; return decode(s2); }
+std::string URLSafe::decode(const char *s) { return decode(std::string(s)); }
 std::string URLSafe::decode(const std::string &s) {
     std::string r;
     for(size_t i = 0; i < s.size(); i++) {
@@ -723,10 +720,11 @@ bool CookieKeyManager::check_valid(const std::string &data, const std::string &c
 }
 
 // AuthenticatedCookies
-const std::string AuthenticatedCookies::TIMESTAMP_KEY = "_ts";
+const std::chrono::seconds AuthenticatedCookies::NeverExpire(0);
+const std::string AuthenticatedCookies::TIMESTAMP_KEY("_ts");
 AuthenticatedCookies::AuthenticatedCookies(const CookieKeyManager &km, const std::chrono::seconds age) :
     CookiesBase(), cookie_keys(km), max_age(age) {}
-AuthenticatedCookies::AuthenticatedCookies(const CookieKeyManager &km, const std::string &d) :
+AuthenticatedCookies::AuthenticatedCookies(const CookieKeyManager &km, const std::string &d, const std::chrono::seconds age) :
     CookiesBase(), cookie_keys(km), max_age(age) {
     load_data(d);
 }
@@ -752,8 +750,23 @@ bool AuthenticatedCookies::load_data(const std::string &d) {
         return false;
     }
 
-    // check max age
-    todo
+    if (max_age.count()) {
+        // I'm sure there's a way to do this just using std::chrono but I can't
+        // figure it out.
+        unsigned long long ts, now;
+        // Unlikely exception, since we set this value and (hopefully) authenticate it.
+        try {
+            ts = std::stoull(key_value()[TIMESTAMP_KEY]);
+            now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        } catch (...) {
+            erase();
+            return false;
+        }
+        if (now > ts && now - max_age.count() > ts) {
+            erase();
+            return false;
+        }
+    }
 
     auth_valid = true;
     return true;
@@ -764,7 +777,9 @@ void AuthenticatedCookies::erase() { CookiesBase::erase(); }
 bool AuthenticatedCookies::authenticated() { return auth_valid; }
 
 std::string AuthenticatedCookies::serialize() {
-    CookiesBase::kv[TIMESTAMP_KEY] = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    auto now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
+
+    CookiesBase::kv[TIMESTAMP_KEY] = std::to_string(now.time_since_epoch().count());
 
     std::string s = Base64::encode(CookiesBase::serialize());
     AuthenticatedCookieAuthenticator mac = cookie_keys.compute(s);

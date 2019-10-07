@@ -21,8 +21,7 @@ namespace Carafe {
 
 // For the public domain SHA512 implementation
 // Thanks https://github.com/kalven/sha-2
-struct sha512_state
-{
+struct sha512_state {
     std::uint64_t length;
     std::uint64_t state[8];
     std::uint32_t curlen;
@@ -38,9 +37,8 @@ static const size_t SHA512_OUTPUT_SIZE = 64; // 512/8
 class Sha512 {
 public:
     template <typename T>
-    static std::string calculate(const T &);
-
-    static std::string calculate(const char *, size_t);
+    static std::string compute(const T &);
+    static std::string compute(const char *, size_t);
 };
 
 #ifndef LITTLEENDIAN
@@ -52,23 +50,23 @@ public:
     typedef struct {
         std::array<char, 65> encodeLookup;
         char padCharacter;
-    } Base64Charset;
+    } Charset;
 
     // Note, we use | internally as a separator for authenticated cookies, so don't
     // add it to any of these character sets!
-    static const Base64Charset CharsetStandard __attribute__((unused));
+    static const Charset CharsetStandard;
 
     // Matches the "standard" web-safe base64 character set.
-    static const Base64Charset CharsetURLSafe;
+    static const Charset CharsetURLSafe;
 
     template <typename T>
-    static std::string encode(const T &, const size_t, const Base64Charset & = CharsetURLSafe);
+    static std::string encode(const T &, const size_t, const Charset & = CharsetURLSafe);
     template <typename T>
-    static std::string encode(const T &, const Base64Charset & = CharsetURLSafe);
+    static std::string encode(const T &, const Charset & = CharsetURLSafe);
     template <typename T>
-    static std::string decode(const T &, const size_t, const Base64Charset & = CharsetURLSafe);
+    static std::string decode(const T &, const size_t, const Charset & = CharsetURLSafe);
     template <typename T>
-    static std::string decode(const T &, const Base64Charset & = CharsetURLSafe);
+    static std::string decode(const T &, const Charset & = CharsetURLSafe);
 };
 
 class URLSafe {
@@ -183,12 +181,12 @@ typedef uint64_t CookieKeyManagerID;
 typedef struct {
     SecureKey key;
     std::chrono::time_point<std::chrono::system_clock> ts;
-} CookieSecreKeyAndTime;
+} CookieSecretKeyAndTime;
 
 class CookieKeyManager {
 private:
     SecureKey encrypt_key;
-    std::unordered_map<CookieKeyManagerID, CookieSecreKeyAndTime> decrypt_keys;
+    std::unordered_map<CookieKeyManagerID, CookieSecretKeyAndTime> decrypt_keys;
     class Spinlock { // Only to be used with lock_guard.
         std::atomic_flag flag = ATOMIC_FLAG_INIT;
     public:
@@ -201,7 +199,7 @@ private:
     CookieKeyManagerID add_decrypt_key_no_lock(const SecureKey &);
 public:
     CookieKeyManager();
-    CookieKeyManager(const std::string &key) : encrypt_key(key);
+    CookieKeyManager(const std::string &key);
 
     // Don't want to copy the Spinlock, so just disable all copies. Shouldn't
     // be necessary anyway.
@@ -233,9 +231,11 @@ private:
     bool auth_valid = false;
     const std::chrono::seconds max_age;
 public:
+    static const std::chrono::seconds NeverExpire;
     static const std::string TIMESTAMP_KEY;
-    AuthenticatedCookies(const CookieKeyManager &, const std::chrono::seconds);
-    AuthenticatedCookies(const CookieKeyManager &, const std::string &, const std::chrono::seconds);
+
+    AuthenticatedCookies(const CookieKeyManager &, const std::chrono::seconds = NeverExpire);
+    AuthenticatedCookies(const CookieKeyManager &, const std::string &, const std::chrono::seconds = NeverExpire);
     bool load_data(const std::string &);
 
     CookieMap &key_value();
