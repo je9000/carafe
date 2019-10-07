@@ -69,7 +69,7 @@ public:
     static std::string decode(const T &, const Charset & = CharsetURLSafe);
 };
 
-class URLSafe {
+class URLSafeCharacters {
 public:
     static std::string encode(const char *);
     static std::string encode(const std::string &);
@@ -94,6 +94,7 @@ class CookiesBase {
 protected:
     bool flag_secure = false;
     bool flag_httponly = false;
+    bool process_flags_and_special = true;
     CookieMap kv;
 private:
     static bool case_insensitive_equals(const std::string &, const char *);

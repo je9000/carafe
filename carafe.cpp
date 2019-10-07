@@ -299,8 +299,8 @@ std::string Base64::decode(const T& inputBuffer, const Charset &charset) {
 // End public domain Base64
 
 // URLSafe
-std::string URLSafe::encode(const char *s) { return encode(std::string(s)); }
-std::string URLSafe::encode(const std::string &s) {
+std::string URLSafeCharacters::encode(const char *s) { return encode(std::string(s)); }
+std::string URLSafeCharacters::encode(const std::string &s) {
     std::string r;
     for(unsigned char c : s) {
         if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '.' || c == '-' || c == '_' || c == '~') {
@@ -315,8 +315,8 @@ std::string URLSafe::encode(const std::string &s) {
     return r;
 }
 
-std::string URLSafe::decode(const char *s) { return decode(std::string(s)); }
-std::string URLSafe::decode(const std::string &s) {
+std::string URLSafeCharacters::decode(const char *s) { return decode(std::string(s)); }
+std::string URLSafeCharacters::decode(const std::string &s) {
     std::string r;
     for(size_t i = 0; i < s.size(); i++) {
         std::array<char, 3> hex;
@@ -403,11 +403,17 @@ void CookiesBase::load_data(const std::string &d) {
             while (d[start] == ' ') start++;
             val = d.substr(start, end_pos - start);
             // Special case-insensitive cookie flags. See rfc6265.
-            if (case_insensitive_equals(val, "secure")) {
-                flag_secure = true;
-            } else if (case_insensitive_equals(val, "httponly")) {
-                flag_httponly = true;
-            } else {
+            bool set_special = false;
+            if (process_flags_and_special) {
+                if (case_insensitive_equals(val, "secure")) {
+                    flag_secure = true;
+                    set_special = true;
+                } else if (case_insensitive_equals(val, "httponly")) {
+                    flag_httponly = true;
+                    set_special = true;
+                }
+            }
+            if (!set_special) {
                 kv[""] = val;
             }
         } else {
@@ -415,17 +421,25 @@ void CookiesBase::load_data(const std::string &d) {
             key = d.substr(start, eqpos - start);
             val = d.substr(eqpos + 1, end_pos - eqpos - 1);
             // Special case-insensitive cookie names. See rfc6265.
-            if (case_insensitive_equals(key, "path")) {
-                kv["path"] = val;
-            } else if (case_insensitive_equals(key, "expires")) {
-                kv["expires"] = val;
-            } else if (case_insensitive_equals(key, "max-age")) {
-                kv["max-age"] = val;
-            } else if (case_insensitive_equals(key, "domain")) {
-                kv["domain"] = val;
-            } else {
-                key = URLSafe::decode(key);
-                val = URLSafe::decode(val);
+            bool set_special = false;
+            if (process_flags_and_special) {
+                if (case_insensitive_equals(key, "path")) {
+                    kv["path"] = val;
+                    set_special = true;
+                } else if (case_insensitive_equals(key, "expires")) {
+                    kv["expires"] = val;
+                    set_special = true;
+                } else if (case_insensitive_equals(key, "max-age")) {
+                    kv["max-age"] = val;
+                    set_special = true;
+                } else if (case_insensitive_equals(key, "domain")) {
+                    kv["domain"] = val;
+                    set_special = true;
+                }
+            }
+            if (!set_special) {
+                key = URLSafeCharacters::decode(key);
+                val = URLSafeCharacters::decode(val);
                 if (key.size() || val.size()) kv[key] = val; // key can be "", weird huh?
             }
         }
@@ -450,14 +464,16 @@ std::string CookiesBase::serialize() {
     std::string s;
     for(const auto &i : kv) {
         if (!i.first.size() && !i.second.size()) continue;
-        s += URLSafe::encode(i.first);
+        s += URLSafeCharacters::encode(i.first);
         s += '=';
-        s += URLSafe::encode(i.second);
+        s += URLSafeCharacters::encode(i.second);
         s += ';';
         s += ' ';
     }
-    if (flag_secure) s += "Secure; ";
-    if (flag_httponly) s += "HttpOnly; ";
+    if (process_flags_and_special) {
+        if (flag_secure) s += "Secure; ";
+        if (flag_httponly) s += "HttpOnly; ";
+    }
     if (s.size()) { // trailing "; "
         s.pop_back();
         s.pop_back();
@@ -723,9 +739,18 @@ bool CookieKeyManager::check_valid(const std::string &data, const std::string &c
 const std::chrono::seconds AuthenticatedCookies::NeverExpire(0);
 const std::string AuthenticatedCookies::TIMESTAMP_KEY("_ts");
 AuthenticatedCookies::AuthenticatedCookies(const CookieKeyManager &km, const std::chrono::seconds age) :
-    CookiesBase(), cookie_keys(km), max_age(age) {}
+    CookiesBase(),
+    cookie_keys(km),
+    max_age(age)
+{
+        process_flags_and_special = false;
+}
 AuthenticatedCookies::AuthenticatedCookies(const CookieKeyManager &km, const std::string &d, const std::chrono::seconds age) :
-    CookiesBase(), cookie_keys(km), max_age(age) {
+    CookiesBase(),
+    cookie_keys(km),
+    max_age(age)
+{
+    process_flags_and_special = false;
     load_data(d);
 }
 
