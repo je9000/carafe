@@ -65,8 +65,8 @@ int main(int argc, char **argv) {
     Carafe::CookieKeyManager ck("heres a long key");
     // Inner authenticated cookie
     Carafe::AuthenticatedCookies c(ck);
-    c.key_value().emplace("securekey1", "secureval1");
-    c.key_value().emplace("securekey2", "secureval2");
+    c.key_value().emplace("authenticatedkey1", "authenticatedval1");
+    c.key_value().emplace("authenticatedkey2", "authenticatedval2");
 
     // Cookie in response object
     auto c2 = Carafe::Cookies();
@@ -79,11 +79,11 @@ int main(int argc, char **argv) {
 
     // Innter authenticated cookie
     Carafe::AuthenticatedCookies c4(ck);
-    if (!c2.key_value().count("auth")) throw std::runtime_error("Couldn't extract secure cookies!");
-    // If we didn't explicitely check above, could throw if "auth", the secure cookie, isn't found.
+    if (!c2.key_value().count("auth")) throw std::runtime_error("Couldn't extract authenticated cookies!");
+    // If we didn't explicitely check above, could throw if "auth", the authenticated sub-cookie, isn't found.
     c4.load_data(c2.key_value().at("auth"));
-    if (!c4.authenticated()) throw std::runtime_error("Securec cookie did not authenticate!");
-    if (c4.key_value()["securekey2"] != "secureval2") throw std::runtime_error("Secure ccookie value incorrect!");
+    if (!c4.authenticated()) throw std::runtime_error("Authenticated cookie did not authenticate!");
+    if (c4.key_value()["authenticatedkey2"] != "authenticatedval2") throw std::runtime_error("Authenticated cookie value incorrect!");
 #endif
 
     Carafe::HTTPD httpd(port);
