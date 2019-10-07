@@ -5,7 +5,7 @@ include(TestBigEndian)
 project(carafe)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_FLAGS "-O2 -g -Wall")
-file(GLOB SOURCES "main.cpp")
+file(GLOB SOURCES "*.cpp")
 ADD_DEFINITIONS(-DCARAFE_SECURE_COOKIES)
 
 TEST_BIG_ENDIAN(BIGENDIAN)
