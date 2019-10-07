@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
         std::cout << Carafe::HTTPD::generate_access_log(request, response, method) << "\n";
     };
 
-    httpd.error_log_callback = [](Carafe::Request &request, const char *method, const std::exception e) {
+    httpd.error_log_callback = [](Carafe::Request &request, const char *method, const std::exception &e) {
         std::cerr << "Exception: " << e.what() << "\n";
     };
 
