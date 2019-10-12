@@ -19,8 +19,7 @@
 
 using namespace Carafe;
 
-static const u64 K[80] =
-{
+static const std::array<u64, 80> K = {
     0x428a2f98d728ae22ULL, 0x7137449123ef65cdULL, 0xb5c0fbcfec4d3b2fULL, 0xe9b5dba58189dbbcULL, 0x3956c25bf348b538ULL,
     0x59f111f1b605d019ULL, 0x923f82a4af194f9bULL, 0xab1c5ed5da6d8118ULL, 0xd807aa98a3030242ULL, 0x12835b0145706fbeULL,
     0x243185be4ee4b28cULL, 0x550c7dc3d5ffb4e2ULL, 0x72be5d74f27b896fULL, 0x80deb1fe3b1696b1ULL, 0x9bdc06a725c71235ULL,
@@ -39,8 +38,7 @@ static const u64 K[80] =
     0x431d67c49c100d4cULL, 0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
 };
 
-static u32 min(u32 x, u32 y)
-{
+static u32 min(const u32 x, const u32 y) {
     return x < y ? x : y;
 }
 
@@ -67,26 +65,28 @@ static u64 Sigma1(u64 x)            { return Rot(x, 14) ^ Rot(x, 18) ^ Rot(x, 41
 static u64 Gamma0(u64 x)            { return Rot(x, 1) ^ Rot(x, 8) ^ Sh(x, 7); }
 static u64 Gamma1(u64 x)            { return Rot(x, 19) ^ Rot(x, 61) ^ Sh(x, 6); }
 
-static void sha_compress(sha512_state& md, const unsigned char *buf)
+static void sha_compress(_sha512_state& md, const unsigned char *buf)
 {
-    u64 S[8], W[80], t0, t1;
+    std::array<u64, 8> S;
+    std::array<u64, 80> W;
 
     // Copy state into S
     for(int i = 0; i < 8; i++)
-        S[i] = md.state[i];
+        S.at(i) = md.state.at(i);
 
     // Copy the state into 1024-bits into W[0..15]
     for(int i = 0; i < 16; i++)
-        W[i] = load64(buf + (8*i));
+        W.at(i) = load64(buf + (8*i));
 
     // Fill W[16..79]
     for(int i = 16; i < 80; i++)
-        W[i] = Gamma1(W[i - 2]) + W[i - 7] + Gamma0(W[i - 15]) + W[i - 16];
+        W.at(i) = Gamma1(W.at(i - 2)) + W.at(i - 7) + Gamma0(W.at(i - 15)) + W.at(i - 16);
 
     // Compress
-    auto RND = [&](u64 a, u64 b, u64 c, u64& d, u64 e, u64 f, u64 g, u64& h, u64 i)
+    auto RND = [W](u64 a, u64 b, u64 c, u64& d, u64 e, u64 f, u64 g, u64& h, u64 i)
     {
-        t0 = h + Sigma1(e) + Ch(e, f, g) + K[i] + W[i];
+        u64 t0, t1;
+        t0 = h + Sigma1(e) + Ch(e, f, g) + K.at(i) + W.at(i);
         t1 = Sigma0(a) + Maj(a, b, c);
         d += t0;
         h  = t0 + t1;
@@ -94,40 +94,40 @@ static void sha_compress(sha512_state& md, const unsigned char *buf)
 
     for(int i = 0; i < 80; i += 8)
     {
-        RND(S[0],S[1],S[2],S[3],S[4],S[5],S[6],S[7],i+0);
-        RND(S[7],S[0],S[1],S[2],S[3],S[4],S[5],S[6],i+1);
-        RND(S[6],S[7],S[0],S[1],S[2],S[3],S[4],S[5],i+2);
-        RND(S[5],S[6],S[7],S[0],S[1],S[2],S[3],S[4],i+3);
-        RND(S[4],S[5],S[6],S[7],S[0],S[1],S[2],S[3],i+4);
-        RND(S[3],S[4],S[5],S[6],S[7],S[0],S[1],S[2],i+5);
-        RND(S[2],S[3],S[4],S[5],S[6],S[7],S[0],S[1],i+6);
-        RND(S[1],S[2],S[3],S[4],S[5],S[6],S[7],S[0],i+7);
+        RND(S.at(0),S.at(1),S.at(2),S.at(3),S.at(4),S.at(5),S.at(6),S.at(7),i+0);
+        RND(S.at(7),S.at(0),S.at(1),S.at(2),S.at(3),S.at(4),S.at(5),S.at(6),i+1);
+        RND(S.at(6),S.at(7),S.at(0),S.at(1),S.at(2),S.at(3),S.at(4),S.at(5),i+2);
+        RND(S.at(5),S.at(6),S.at(7),S.at(0),S.at(1),S.at(2),S.at(3),S.at(4),i+3);
+        RND(S.at(4),S.at(5),S.at(6),S.at(7),S.at(0),S.at(1),S.at(2),S.at(3),i+4);
+        RND(S.at(3),S.at(4),S.at(5),S.at(6),S.at(7),S.at(0),S.at(1),S.at(2),i+5);
+        RND(S.at(2),S.at(3),S.at(4),S.at(5),S.at(6),S.at(7),S.at(0),S.at(1),i+6);
+        RND(S.at(1),S.at(2),S.at(3),S.at(4),S.at(5),S.at(6),S.at(7),S.at(0),i+7);
     }
 
     // Feedback
     for(int i = 0; i < 8; i++)
-        md.state[i] = md.state[i] + S[i];
+        md.state.at(i) = md.state.at(i) + S.at(i);
 }
 
 // Public interface
 
-static void sha_init(sha512_state& md)
+static void sha_init(_sha512_state& md)
 {
     md.curlen = 0;
     md.length = 0;
-    md.state[0] = 0x6a09e667f3bcc908ULL;
-    md.state[1] = 0xbb67ae8584caa73bULL;
-    md.state[2] = 0x3c6ef372fe94f82bULL;
-    md.state[3] = 0xa54ff53a5f1d36f1ULL;
-    md.state[4] = 0x510e527fade682d1ULL;
-    md.state[5] = 0x9b05688c2b3e6c1fULL;
-    md.state[6] = 0x1f83d9abfb41bd6bULL;
-    md.state[7] = 0x5be0cd19137e2179ULL;
+    md.state.at(0) = 0x6a09e667f3bcc908ULL;
+    md.state.at(1) = 0xbb67ae8584caa73bULL;
+    md.state.at(2) = 0x3c6ef372fe94f82bULL;
+    md.state.at(3) = 0xa54ff53a5f1d36f1ULL;
+    md.state.at(4) = 0x510e527fade682d1ULL;
+    md.state.at(5) = 0x9b05688c2b3e6c1fULL;
+    md.state.at(6) = 0x1f83d9abfb41bd6bULL;
+    md.state.at(7) = 0x5be0cd19137e2179ULL;
 }
 
-static void sha_process(sha512_state& md, const void* src, u32 inlen)
+static void sha_process(_sha512_state& md, const void* src, u32 inlen)
 {
-    const u32 block_size = sizeof(sha512_state::buf);
+    const u32 block_size = sizeof(_sha512_state::buf);
     auto in = static_cast<const unsigned char*>(src);
 
     while(inlen > 0)
@@ -142,14 +142,14 @@ static void sha_process(sha512_state& md, const void* src, u32 inlen)
         else
         {
             u32 n = min(inlen, (block_size - md.curlen));
-            std::memcpy(md.buf + md.curlen, in, n);
+            std::memcpy(md.buf.data() + md.curlen, in, n);
             md.curlen += n;
             in        += n;
             inlen     -= n;
 
             if(md.curlen == block_size)
             {
-                sha_compress(md, md.buf);
+                sha_compress(md, md.buf.data());
                 md.length += 8*block_size;
                 md.curlen = 0;
             }
@@ -157,7 +157,7 @@ static void sha_process(sha512_state& md, const void* src, u32 inlen)
     }
 }
 
-static void sha_done(sha512_state& md, void *out)
+static void sha_done(_sha512_state& md, void *out)
 {
     // Increase the length of the message
     md.length += md.curlen * 8ULL;
@@ -171,7 +171,7 @@ static void sha_done(sha512_state& md, void *out)
     {
         while(md.curlen < 128)
             md.buf[md.curlen++] = 0;
-        sha_compress(md, md.buf);
+        sha_compress(md, md.buf.data());
         md.curlen = 0;
     }
 
@@ -182,23 +182,18 @@ static void sha_done(sha512_state& md, void *out)
         md.buf[md.curlen++] = 0;
 
     // Store length
-    store64(md.length, md.buf+120);
-    sha_compress(md, md.buf);
+    store64(md.length, &md.buf.at(120));
+    sha_compress(md, md.buf.data());
 
     // Copy output
     for(int i = 0; i < 8; i++)
-        store64(md.state[i], static_cast<unsigned char*>(out)+(8*i));
+        store64(md.state.at(i), static_cast<unsigned char*>(out)+(8*i));
 }
 
 // End public domain SHA2 implementation
 
-template <typename T>
-std::string Sha512::compute(const T &s) {
-    return compute(s.data(), s.size());
-}
-
 std::string Sha512::compute(const char *buf, size_t size) {
-    sha512_state s;
+    _sha512_state s;
     std::array<char, SHA512_OUTPUT_SIZE> out;
 
     if (size > UINT32_MAX) throw std::out_of_range("Input too large");
@@ -224,16 +219,15 @@ const Base64::Charset Base64::CharsetURLSafe {
 #ifndef LITTLEENDIAN
 #error "Base64 routines only support little-endian architectures"
 #endif
-template <typename T>
-std::string Base64::encode(const T& inputBuffer, size_t in_size, const Charset &charset) {
+std::string Base64::encode(const char *in, size_t in_size, const Charset &charset) {
     std::string encodedString;
     encodedString.reserve(((in_size/3) + (in_size % 3 > 0)) * 4);
     uint32_t temp;
-    auto cursor = inputBuffer.begin();
+    size_t in_idx = 0;
     for (size_t idx = 0; idx < in_size/3; idx++) {
-        temp  = (*cursor++) << 16; //Convert to big endian
-        temp += (*cursor++) << 8;
-        temp += (*cursor++);
+        temp  = in[in_idx++] << 16; //Convert to big endian
+        temp += in[in_idx++] << 8;
+        temp += in[in_idx++];
         encodedString.append(1,charset.encodeLookup.at((temp & 0x00FC0000) >> 18));
         encodedString.append(1,charset.encodeLookup.at((temp & 0x0003F000) >> 12));
         encodedString.append(1,charset.encodeLookup.at((temp & 0x00000FC0) >> 6 ));
@@ -241,14 +235,14 @@ std::string Base64::encode(const T& inputBuffer, size_t in_size, const Charset &
     }
     switch (in_size % 3) {
         case 1:
-            temp  = (*cursor++) << 16; //Convert to big endian
+            temp  = in[in_idx++] << 16; //Convert to big endian
             encodedString.append(1,charset.encodeLookup.at((temp & 0x00FC0000) >> 18));
             encodedString.append(1,charset.encodeLookup.at((temp & 0x0003F000) >> 12));
             encodedString.append(2,charset.padCharacter);
             break;
         case 2:
-            temp  = (*cursor++) << 16; //Convert to big endian
-            temp += (*cursor++) << 8;
+            temp  = in[in_idx++] << 16; //Convert to big endian
+            temp += in[in_idx++] << 8;
             encodedString.append(1,charset.encodeLookup.at((temp & 0x00FC0000) >> 18));
             encodedString.append(1,charset.encodeLookup.at((temp & 0x0003F000) >> 12));
             encodedString.append(1,charset.encodeLookup.at((temp & 0x00000FC0) >> 6 ));
@@ -258,21 +252,15 @@ std::string Base64::encode(const T& inputBuffer, size_t in_size, const Charset &
     return encodedString;
 }
 
-template <typename T>
-std::string Base64::encode(const T& inputBuffer, const Charset &charset) {
-    return encode(inputBuffer, inputBuffer.size(), charset);
-}
-
-template <typename T>
-std::string Base64::decode(const T& inputBuffer, size_t in_size, const Charset &charset) {
+std::string Base64::decode(const char *in, size_t in_size, const Charset &charset) {
     uint_fast32_t leftover = 0;
     char i;
     std::string s;
     s.reserve(in_size * 3 / 4); // if the input lacks padding, this might be too much space
     for (size_t x = 0; x < in_size; x++) {
         char c;
-        if (inputBuffer.at(x) == charset.padCharacter) break;
-        for(c = 0; c < 64; c++) if (charset.encodeLookup.at(c) == inputBuffer.at(x)) break;
+        if (in[x] == charset.padCharacter) break;
+        for(c = 0; c < 64; c++) if (charset.encodeLookup.at(c) == in[x]) break;
         if (x % 4 == 0) {
             leftover = c << 2;
             continue;
@@ -291,11 +279,6 @@ std::string Base64::decode(const T& inputBuffer, size_t in_size, const Charset &
     return s;
 }
 
-template <typename T>
-std::string Base64::decode(const T& inputBuffer, const Charset &charset) {
-    return decode(inputBuffer, inputBuffer.size(), charset);
-}
-
 // End public domain Base64
 
 // URLSafe
@@ -307,7 +290,8 @@ std::string URLSafeCharacters::encode(const std::string &s) {
             r += c;
         } else {
             std::array<char, 4> hex;
-            size_t len = snprintf(hex.data(), hex.size(), "%%%02X", c);
+            unsigned int the_char = c;
+            size_t len = snprintf(hex.data(), hex.size(), "%%%02X", the_char);
             if (len >= hex.size()) throw std::out_of_range("Error in hex conversion"); // Shouldn't happen.
             r.append(hex.data(), len);
         }
@@ -341,14 +325,19 @@ std::string URLSafeCharacters::decode(const std::string &s) {
 }
 
 // Hex
-std::string Hex::encode(const std::string &str) { return encode(str.data(), str.size()); }
-std::string Hex::encode(const char *s) { return encode(s, strlen(s)); }
-std::string Hex::encode(const char *s, size_t len) {
+const char *Hex::CharsUpper = "%02X";
+const char *Hex::CharsLower = "%02x";
+std::string Hex::encode(const std::string &str, const Charset hc) { return encode(str.data(), str.size(), hc); }
+std::string Hex::encode(const char *s, const Charset hc) { return encode(s, strlen(s), hc); }
+std::string Hex::encode(const char *s, size_t len, const Charset hc) {
+    const char *hex_conversion = CharsLower;
+    if (hc == Upper) hex_conversion = CharsUpper;
     std::string r;
     r.reserve(len * 2);
     for(size_t i = 0; i < len; i++) {
         std::array<char, 3> hex;
-        size_t len = snprintf(hex.data(), hex.size(), "%02X", s[i]);
+        unsigned int c = (unsigned char) s[i];
+        size_t len = snprintf(hex.data(), hex.size(), hex_conversion, c);
         if (len >= hex.size()) throw std::out_of_range("Error in hex conversion"); // Shouldn't happen.
         r.append(hex.data(), len);
     }
@@ -584,7 +573,7 @@ SecureKey::SecureKey(const std::string &s) {
     rekey(s);
 }
 
-void SecureKey::get_keyed_state(sha512_state &dest) const {
+void SecureKey::get_keyed_state(_sha512_state &dest) const {
     memcpy(&dest, &precomputed_key_state, sizeof(precomputed_key_state));
 }
 
@@ -592,7 +581,7 @@ void SecureKey::get_keyed_state(sha512_state &dest) const {
 AuthenticatedCookieAuthenticator::AuthenticatedCookieAuthenticator(const SecureKey &k) : key(k) {}
 
 const std::string &AuthenticatedCookieAuthenticator::compute_from_string(const std::string &in) {
-    sha512_state s;
+    _sha512_state s;
     std::array<char, SHA512_OUTPUT_SIZE> out;
 
     if (in.size() > UINT32_MAX) throw std::out_of_range("Input too large");
@@ -602,7 +591,8 @@ const std::string &AuthenticatedCookieAuthenticator::compute_from_string(const s
     sha_process(s, in.data(), static_cast<u32>(in.size()));
     sha_done(s, out.data());
 
-    mac = Base64::encode(out, out.size());
+    static_assert(MAC_SIZE <= out.size() - 12, "MAC_SIZE is too large for hash output size");
+    mac = Base64::encode(out.data(), MAC_SIZE);
     return mac;
 }
 
@@ -711,25 +701,25 @@ CookieKeyManagerID CookieKeyManager::generate_new_encrypt_key() {
 
 AuthenticatedCookieAuthenticator CookieKeyManager::compute(const std::string &data) const {
     std::lock_guard<Spinlock> elock(encrypt_key_lock);
-    AuthenticatedCookieAuthenticator csca(encrypt_key);
-    csca.compute_from_string(data);
-    return csca;
+    AuthenticatedCookieAuthenticator authenticator(encrypt_key);
+    authenticator.compute_from_string(data);
+    return authenticator;
 }
 
 // CookieKeyManager
 bool CookieKeyManager::check_valid(const std::string &data, const std::string &check_me) const {
     {
         std::lock_guard<Spinlock> elock(encrypt_key_lock);
-        AuthenticatedCookieAuthenticator csca(encrypt_key);
-        csca.compute_from_string(data);
-        if (csca.safe_equals(check_me)) return true;
+        AuthenticatedCookieAuthenticator authenticator(encrypt_key);
+        authenticator.compute_from_string(data);
+        if (authenticator.safe_equals(check_me)) return true;
     }
 
     std::lock_guard<Spinlock> dlock(decrypt_key_lock);
     for(const auto &key : decrypt_keys) {
-        AuthenticatedCookieAuthenticator csca(key.second.key);
-        csca.compute_from_string(data);
-        if (csca.safe_equals(check_me)) return true;
+        AuthenticatedCookieAuthenticator authenticator(key.second.key);
+        authenticator.compute_from_string(data);
+        if (authenticator.safe_equals(check_me)) return true;
     }
 
     return false;

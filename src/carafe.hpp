@@ -21,11 +21,11 @@ namespace Carafe {
 
 // For the public domain SHA512 implementation
 // Thanks https://github.com/kalven/sha-2
-struct sha512_state {
+struct _sha512_state {
     std::uint64_t length;
-    std::uint64_t state[8];
+    std::array<std::uint64_t, 8> state;
     std::uint32_t curlen;
-    unsigned char buf[128];
+    std::array<unsigned char, 128> buf;
 };
 
 typedef std::uint32_t u32;
@@ -37,7 +37,9 @@ static const size_t SHA512_OUTPUT_SIZE = 64; // 512/8
 class Sha512 {
 public:
     template <typename T>
-    static std::string compute(const T &);
+    static std::string compute(const T &s) {
+        return compute(s.data(), s.size());
+    }
     static std::string compute(const char *, size_t);
 };
 
@@ -59,14 +61,20 @@ public:
     // Matches the "standard" web-safe base64 character set.
     static const Charset CharsetURLSafe;
 
+    static std::string encode(const char *, const size_t, const Charset & = CharsetURLSafe);
+
     template <typename T>
-    static std::string encode(const T &, const size_t, const Charset & = CharsetURLSafe);
+    static std::string encode(const T &in, const Charset &charset = CharsetURLSafe) {
+        return encode(in.data(), in.size(), charset);
+    }
+
+    static std::string decode(const char *, const size_t, const Charset & = CharsetURLSafe);
+
     template <typename T>
-    static std::string encode(const T &, const Charset & = CharsetURLSafe);
-    template <typename T>
-    static std::string decode(const T &, const size_t, const Charset & = CharsetURLSafe);
-    template <typename T>
-    static std::string decode(const T &, const Charset & = CharsetURLSafe);
+    static std::string decode(const T &in, const Charset &charset = CharsetURLSafe) {
+        return decode(in.data(), in.size(), charset);
+    }
+
 };
 
 class URLSafeCharacters {
@@ -79,10 +87,17 @@ public:
 };
 
 class Hex {
+private:
+    static const char *CharsUpper;
+    static const char *CharsLower;
 public:
-    static std::string encode(const std::string &);
-    static std::string encode(const char *);
-    static std::string encode(const char *, size_t);
+    enum Charset {
+        Lower,
+        Upper
+    };
+    static std::string encode(const std::string &, const Charset = Lower);
+    static std::string encode(const char *, const Charset = Lower);
+    static std::string encode(const char *, size_t, const Charset = Lower);
     static std::string decode(const std::string &);
     static std::string decode(const char *);
     static std::string decode(const char *, size_t);
@@ -136,7 +151,7 @@ public:
 class SecureKey {
 private:
     static constexpr size_t DEFAULT_KEY_SIZE = 24; // Arbitrary
-    sha512_state precomputed_key_state;
+    _sha512_state precomputed_key_state;
 
     void precompute_state(const char *, const size_t);
 public:
@@ -148,7 +163,7 @@ public:
 
     SecureKey(const std::string &);
 
-    void get_keyed_state(sha512_state &) const;
+    void get_keyed_state(_sha512_state &) const;
 };
 
 // Class that represents the MAC on a string. Performs a secure MAC string
@@ -159,7 +174,7 @@ private:
     const SecureKey &key;
 public:
     // SHA512/264, so there are no base64 padding characters.
-    static constexpr size_t MAC_SIZE = 33;
+    static constexpr size_t MAC_SIZE = 33; // 264 bits / 8 bits per byte
     static_assert((MAC_SIZE * 4) % 3 == 0, "MAC_SIZE requires padding");
     static constexpr size_t ENCODED_SIZE = (MAC_SIZE * 4) / 3;
 
