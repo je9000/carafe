@@ -113,8 +113,9 @@ static void sha_compress(_sha512_state& md, const unsigned char *buf)
 
 static void sha_init(_sha512_state& md)
 {
-    md.curlen = 0;
-    md.length = 0;
+    memset(&md, 0, sizeof(md));
+    //md.curlen = 0;
+    //md.length = 0;
     md.state.at(0) = 0x6a09e667f3bcc908ULL;
     md.state.at(1) = 0xbb67ae8584caa73bULL;
     md.state.at(2) = 0x3c6ef372fe94f82bULL;
@@ -503,11 +504,6 @@ void Random::fill(char *buf, size_t len) {
 #else
 #error "Don't know how to generate cryptographically-secure random numbers on this platform"
 #endif
-}
-
-template <typename T>
-void Random::fill(T in) {
-    fill(in.data(), in.size());
 }
 
 std::string Random::get(size_t size) {

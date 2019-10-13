@@ -5,7 +5,7 @@ include(TestBigEndian)
 project(carafe)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_FLAGS "-O2 -g -Wall")
-file(GLOB SOURCES "*.cpp")
+set(SOURCES "main.cpp" "src/carafe.cpp")
 ADD_DEFINITIONS(-DCARAFE_AUTHENTICATED_COOKIES)
 
 TEST_BIG_ENDIAN(BIGENDIAN)
@@ -27,3 +27,6 @@ endif()
 
 add_executable(carafe ${SOURCES})
 target_link_libraries(carafe microhttpd)
+
+enable_testing()
+add_subdirectory(test)

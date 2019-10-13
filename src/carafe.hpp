@@ -135,7 +135,9 @@ public:
     static void fill(char *, size_t);
 
     template <typename T>
-    static void fill(T);
+    static void fill(T &in) {
+        fill(in.data(), in.size());
+    }
 
     static std::string get(size_t = 16);
 
