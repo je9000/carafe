@@ -42,17 +42,21 @@ static u32 min(const u32 x, const u32 y) {
     return x < y ? x : y;
 }
 
-static void store64(u64 x, unsigned char* y)
+static void store64(u64 x, unsigned char *y, size_t offset, size_t y_size)
 {
-    for(int i = 0; i != 8; ++i)
-        y[i] = (x >> ((7-i) * 8)) & 255;
+    for(int i = 0; i != 8; ++i) {
+        if (offset + i >= y_size) throw std::out_of_range("store64");
+        y[offset + i] = (x >> ((7-i) * 8)) & 255;
+    }
 }
 
-static u64 load64(const unsigned char* y)
+static u64 load64(const unsigned char *y, size_t offset, size_t y_size)
 {
     u64 res = 0;
-    for(int i = 0; i != 8; ++i)
-        res |= u64(y[i]) << ((7-i) * 8);
+    for(int i = 0; i != 8; ++i) {
+        if (offset + i >= y_size) throw std::out_of_range("load64");
+        res |= u64(y[offset + i]) << ((7-i) * 8);
+    }
     return res;
 }
 
@@ -65,7 +69,7 @@ static u64 Sigma1(u64 x)            { return Rot(x, 14) ^ Rot(x, 18) ^ Rot(x, 41
 static u64 Gamma0(u64 x)            { return Rot(x, 1) ^ Rot(x, 8) ^ Sh(x, 7); }
 static u64 Gamma1(u64 x)            { return Rot(x, 19) ^ Rot(x, 61) ^ Sh(x, 6); }
 
-static void sha_compress(_sha512_state& md, const unsigned char *buf)
+static void sha_compress(_sha512_state& md, const unsigned char *buf, size_t buf_size)
 {
     std::array<u64, 8> S;
     std::array<u64, 80> W;
@@ -76,7 +80,7 @@ static void sha_compress(_sha512_state& md, const unsigned char *buf)
 
     // Copy the state into 1024-bits into W[0..15]
     for(int i = 0; i < 16; i++)
-        W.at(i) = load64(buf + (8*i));
+        W.at(i) = load64(buf, 8*i, buf_size);
 
     // Fill W[16..79]
     for(int i = 16; i < 80; i++)
@@ -135,7 +139,7 @@ static void sha_process(_sha512_state& md, const void* src, u32 inlen)
     {
         if(md.curlen == 0 && inlen >= block_size)
         {
-            sha_compress(md, in);
+            sha_compress(md, in, inlen);
             md.length += block_size * 8;
             in        += block_size;
             inlen     -= block_size;
@@ -143,6 +147,7 @@ static void sha_process(_sha512_state& md, const void* src, u32 inlen)
         else
         {
             u32 n = min(inlen, (block_size - md.curlen));
+            if (md.curlen + n > md.buf.size()) throw std::out_of_range("internal sha error");
             std::memcpy(md.buf.data() + md.curlen, in, n);
             md.curlen += n;
             in        += n;
@@ -150,7 +155,7 @@ static void sha_process(_sha512_state& md, const void* src, u32 inlen)
 
             if(md.curlen == block_size)
             {
-                sha_compress(md, md.buf.data());
+                sha_compress(md, md.buf.data(), md.buf.size());
                 md.length += 8*block_size;
                 md.curlen = 0;
             }
@@ -158,21 +163,21 @@ static void sha_process(_sha512_state& md, const void* src, u32 inlen)
     }
 }
 
-static void sha_done(_sha512_state& md, void *out)
+static void sha_done(_sha512_state& md, Sha512Output &out)
 {
     // Increase the length of the message
     md.length += md.curlen * 8ULL;
 
     // Append the '1' bit
-    md.buf[md.curlen++] = static_cast<unsigned char>(0x80);
+    md.buf.at(md.curlen++) = static_cast<unsigned char>(0x80);
 
     // If the length is currently above 112 bytes we append zeros then compress.
     // Then we can fall back to padding zeros and length encoding like normal.
     if(md.curlen > 112)
     {
         while(md.curlen < 128)
-            md.buf[md.curlen++] = 0;
-        sha_compress(md, md.buf.data());
+            md.buf.at(md.curlen++) = 0;
+        sha_compress(md, md.buf.data(), md.buf.size());
         md.curlen = 0;
     }
 
@@ -180,27 +185,27 @@ static void sha_done(_sha512_state& md, void *out)
     // note: that from 112 to 120 is the 64 MSB of the length.  We assume that
     // you won't hash 2^64 bits of data... :-)
     while(md.curlen < 120)
-        md.buf[md.curlen++] = 0;
+        md.buf.at(md.curlen++) = 0;
 
     // Store length
-    store64(md.length, &md.buf.at(120));
-    sha_compress(md, md.buf.data());
+    store64(md.length, md.buf.data(), 120, md.buf.size());
+    sha_compress(md, md.buf.data(), md.buf.size());
 
     // Copy output
     for(int i = 0; i < 8; i++)
-        store64(md.state.at(i), static_cast<unsigned char*>(out)+(8*i));
+        store64(md.state.at(i), reinterpret_cast<unsigned char *>(out.data()), i*8, out.size());
 }
 
 // End public domain SHA2 implementation
 
 std::string Sha512::compute(const char *buf, size_t size) {
     _sha512_state s;
-    std::array<char, SHA512_OUTPUT_SIZE> out;
+    Sha512Output out;
 
     if (size > UINT32_MAX) throw std::out_of_range("Input too large");
     sha_init(s);
     sha_process(s, buf, static_cast<u32>(size));
-    sha_done(s, out.data());
+    sha_done(s, out);
     return std::string(out.data(), out.size());
 }
 
@@ -257,11 +262,24 @@ std::string Base64::decode(const char *in, size_t in_size, const Charset &charse
     uint_fast32_t leftover = 0;
     char i;
     std::string s;
-    s.reserve(in_size * 3 / 4); // if the input lacks padding, this might be too much space
+    s.reserve((in_size * 3 / 4) + 1); // if the input lacks padding, this might be too much space
     for (size_t x = 0; x < in_size; x++) {
         char c;
-        if (in[x] == charset.padCharacter) break;
-        for(c = 0; c < 64; c++) if (charset.encodeLookup.at(c) == in[x]) break;
+        if (in[x] == charset.padCharacter) {
+            x++;
+            for (; x < in_size; x++) {
+                if (in[x] != charset.padCharacter) throw std::out_of_range("Invalid base64 padding");
+            }
+            break;
+        }
+        bool found_char = false;
+        for(c = 0; c < 64; c++) {
+            if (charset.encodeLookup.at(c) == in[x]) {
+                found_char = true;
+                break;
+            }
+        }
+        if (!found_char) throw std::out_of_range("Invalid base64 character");
         if (x % 4 == 0) {
             leftover = c << 2;
             continue;
@@ -353,7 +371,7 @@ std::string Hex::decode(const char *s, size_t len) {
     std::array<char, 3> hex;
     r.reserve(len / 2);
     hex[2] = '\0';
-    for(size_t i = 0; i < len / 2; i++) {
+    for(size_t i = 0; i < len - 1; i++) {
         char *end;
         hex[0] = s[i++];
         hex[1] = s[i];
@@ -506,25 +524,25 @@ void Random::fill(char *buf, size_t len) {
 #endif
 }
 
-std::string Random::get(size_t size) {
+std::string Random::get(const size_t size) {
     char temp[size];
     fill(temp, size);
     return std::string(temp, size);
 }
 
-std::string Random::get_base64(size_t size) {
+std::string Random::get_base64(const size_t size, const Carafe::Base64::Charset &charset) {
     std::vector<char> temp;
     temp.resize(size);
     fill(temp);
-    return Base64::encode(temp);
+    return Base64::encode(temp, charset);
 }
 
 // uuid v4
 std::string Random::uuid() {
     std::array<char, 16> buf;
     fill(buf);
-    char &version = buf[6];
-    char &variant = buf[8];
+    char &version = buf.at(6);
+    char &variant = buf.at(8);
     version &= 0b00001111;
     version |= 0b01000000;
     variant &= 0b00111111;
@@ -578,14 +596,14 @@ AuthenticatedCookieAuthenticator::AuthenticatedCookieAuthenticator(const SecureK
 
 const std::string &AuthenticatedCookieAuthenticator::compute_from_string(const std::string &in) {
     _sha512_state s;
-    std::array<char, SHA512_OUTPUT_SIZE> out;
+    Sha512Output out;
 
     if (in.size() > UINT32_MAX) throw std::out_of_range("Input too large");
 
     key.get_keyed_state(s);
 
     sha_process(s, in.data(), static_cast<u32>(in.size()));
-    sha_done(s, out.data());
+    sha_done(s, out);
 
     static_assert(MAC_SIZE <= out.size() - 12, "MAC_SIZE is too large for hash output size");
     mac = Base64::encode(out.data(), MAC_SIZE);

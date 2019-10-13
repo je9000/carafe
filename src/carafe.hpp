@@ -31,6 +31,7 @@ struct _sha512_state {
 typedef std::uint32_t u32;
 typedef std::uint64_t u64;
 static const size_t SHA512_OUTPUT_SIZE = 64; // 512/8
+typedef std::array<char, SHA512_OUTPUT_SIZE> Sha512Output;
 
 // end
 
@@ -139,9 +140,9 @@ public:
         fill(in.data(), in.size());
     }
 
-    static std::string get(size_t = 16);
+    static std::string get(const size_t = 16);
 
-    static std::string get_base64(size_t = 16);
+    static std::string get_base64(const size_t = 16, const Carafe::Base64::Charset & = Carafe::Base64::CharsetURLSafe);
 
     // uuid v4
     static std::string uuid();
