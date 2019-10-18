@@ -131,13 +131,13 @@ TEST_CASE("authenticated cookies", "[authenticated_cookies][cookies]")  {
     Carafe::CookieKeyManager ck("heres a long key");
     // Inner authenticated cookie
     Carafe::AuthenticatedCookies c(ck);
-    c.key_value().emplace("authenticatedkey1", "authenticatedval1");
-    c.key_value().emplace("authenticatedkey2", "authenticatedval2");
+    c.kv().emplace("authenticatedkey1", "authenticatedval1");
+    c.kv().emplace("authenticatedkey2", "authenticatedval2");
 
     // Cookie in response object
     auto c2 = Carafe::Cookies();
     c2.load_data("Test=test_value; expires=Sat, 01-Jan-2000 00:00:00 GMT; path=/; HTTPOnly; =value");
-    c2.key_value().emplace("auth", c.serialize());
+    c2.kv().emplace("auth", c.serialize());
 
     // Cookie in request object
     auto c3 = Carafe::Cookies();
@@ -145,20 +145,20 @@ TEST_CASE("authenticated cookies", "[authenticated_cookies][cookies]")  {
 
     // Innter authenticated cookie
     Carafe::AuthenticatedCookies c4(ck);
-    REQUIRE(c2.key_value().count("auth"));
+    REQUIRE(c2.kv().count("auth"));
     // If we didn't explicitely check above, could throw if "auth", the authenticated sub-cookie, isn't found.
-    c4.load_data(c2.key_value().at("auth"));
+    c4.load_data(c2.kv().at("auth"));
     REQUIRE (c4.authenticated());
-    REQUIRE(c4.key_value()["authenticatedkey2"] == "authenticatedval2");
+    REQUIRE(c4.kv()["authenticatedkey2"] == "authenticatedval2");
 }
 #endif
 
 TEST_CASE("cookies", "[cookies]") {
     Carafe::Cookies cookies;
-    cookies.key_value().emplace("cookie", "value");
+    cookies.kv().emplace("cookie", "value");
     REQUIRE(cookies.serialize() == "cookie=value");
-    cookies.key_value().emplace("c2", "encode me");
-    cookies.key_value().emplace("bunch=o;garbage", std::string("needs\0encoding\n", 15));
+    cookies.kv().emplace("c2", "encode me");
+    cookies.kv().emplace("bunch=o;garbage", std::string("needs\0encoding\n", 15));
     // Iteration order not guaranteed, so we just find what we expect to see
     auto s = cookies.serialize();
     INFO(s);
@@ -168,8 +168,8 @@ TEST_CASE("cookies", "[cookies]") {
 
     Carafe::Cookies c2;
     c2.load_data(cookies.serialize());
-    REQUIRE(c2.key_value().size() == 3);
-    REQUIRE(c2.key_value()["cookie"] == "value");
-    REQUIRE(c2.key_value().at("c2") == "encode me");
-    REQUIRE(c2.key_value().at("bunch=o;garbage") == std::string("needs\0encoding\n", 15));
+    REQUIRE(c2.kv().size() == 3);
+    REQUIRE(c2.kv()["cookie"] == "value");
+    REQUIRE(c2.kv().at("c2") == "encode me");
+    REQUIRE(c2.kv().at("bunch=o;garbage") == std::string("needs\0encoding\n", 15));
 }

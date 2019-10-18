@@ -104,14 +104,14 @@ public:
     static std::string decode(const char *, size_t);
 };
 
-typedef std::unordered_map<std::string, std::string> CookieMap;
+typedef std::unordered_map<std::string, std::string> StringMap;
 
 class CookiesBase {
 protected:
     bool flag_secure = false;
     bool flag_httponly = false;
     bool process_flags_and_special = true;
-    CookieMap kv;
+    StringMap cookie_map;
 private:
     static bool case_insensitive_equals(const std::string &, const char *);
 public:
@@ -120,7 +120,7 @@ public:
     CookiesBase();
     CookiesBase(const std::string &);
 
-    CookieMap &key_value();
+    StringMap &kv();
     void erase();
 
     std::string serialize();
@@ -141,7 +141,6 @@ public:
     }
 
     static std::string get(const size_t = 16);
-
     static std::string get_base64(const size_t = 16, const Carafe::Base64::Charset & = Carafe::Base64::CharsetURLSafe);
 
     // uuid v4
@@ -159,11 +158,9 @@ private:
     void precompute_state(const char *, const size_t);
 public:
     void rekey(const std::string &);
-
     void rekey(void);
 
     SecureKey();
-
     SecureKey(const std::string &);
 
     void get_keyed_state(_sha512_state &) const;
@@ -184,13 +181,11 @@ public:
     AuthenticatedCookieAuthenticator(const SecureKey &);
 
     const std::string &compute_from_string(const std::string &);
-
     const std::string &to_string() const;
 
     void load_from_safebase64(const std::string &);
 
     bool operator==(const AuthenticatedCookieAuthenticator &) const;
-
     bool operator!=(const AuthenticatedCookieAuthenticator &) const;
 
     bool safe_equals(const std::string &) const;
@@ -227,7 +222,6 @@ public:
     CookieKeyManagerID add_decrypt_key(const SecureKey &);
 
     bool remove_decrypt_key(const CookieKeyManagerID);
-
     bool has_decrypt_key(const CookieKeyManagerID) const;
 
     size_t decrypt_key_count() const;
@@ -257,7 +251,7 @@ public:
     AuthenticatedCookies(const CookieKeyManager &, const std::string &, const std::chrono::seconds = NeverExpire);
     bool load_data(const std::string &);
 
-    CookieMap &key_value();
+    StringMap &kv();
     void erase();
     bool authenticated();
 
@@ -287,7 +281,6 @@ typedef unsigned long HTTPMethod;
 class HTTPD;
 class Request;
 class Response;
-typedef std::unordered_map<std::string, std::string> RequestStringMap;
 typedef std::function<void(Request &, Response &)> RouteCallback;
 typedef std::function<void(Request &, Response &, const char *)> AccessLogCallback;
 typedef std::function<void(Request &, const char *, const std::exception &)> ErrorLogCallback;
@@ -306,7 +299,7 @@ public:
 class RequestPostData {
 public:
     std::string data, filename;
-    RequestStringMap headers;
+    StringMap headers;
     RequestPostData(const char *, const char *);
 };
 
@@ -316,7 +309,7 @@ class Response {
 public:
     int code;
     std::string body;
-    RequestStringMap headers;
+    StringMap headers;
     Cookies cookies;
     Response();
     void reset();
@@ -333,7 +326,7 @@ private:
     };
     Request &req;
     ValueType my_type;
-    RequestStringMap all_args;
+    StringMap all_args;
     size_t &current_size, max_size;
     bool all_args_populated;
     const std::string no_value;
@@ -344,9 +337,9 @@ public:
 
     const std::string &get(const std::string &);
 
-    RequestStringMap::iterator begin();
+    StringMap::iterator begin();
 
-    RequestStringMap::iterator end();
+    StringMap::iterator end();
 };
 
 class Request {
@@ -367,7 +360,7 @@ public:
     RequestPostDataMap post_data;
     RequestConnectionValues args, headers;
     Cookies cookies;
-    RequestStringMap vars;
+    StringMap vars;
     void *context;
 
     size_t current_arg_size = 0;
@@ -412,7 +405,7 @@ private:
 
 public:
     size_t max_upload_size, max_header_size;
-    bool keep_running;
+    std::atomic_bool keep_running; // We could be running in multiple threads via microhttpd
     AccessLogCallback access_log_callback;
     ErrorLogCallback error_log_callback;
     unsigned int timeout, thread_pool_size;

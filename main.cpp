@@ -4,12 +4,15 @@
 
 #include "src/carafe.hpp"
 
-#ifdef CARAFE_AUTHENTICATED_COOKIES
 Carafe::CookieKeyManager cm;
-Carafe::SecureKey mac_key;
-#endif
 
-void test(Carafe::Request &request, Carafe::Response &response) {
+void hello(Carafe::Request &request, Carafe::Response &response) {
+    response.code = 200;
+    response.headers["Content-type"] = "text/html";
+    response.body = "<body><h1>Hello world!</h1></body>\n";
+}
+
+void headers(Carafe::Request &request, Carafe::Response &response) {
     response.code = 200;
     response.body = "Headers:\n";
 
@@ -17,37 +20,30 @@ void test(Carafe::Request &request, Carafe::Response &response) {
         response.body += i.first + "=" + i.second + "\n";
     }
 
-    response.body += "\nCookies: " + request.cookies.key_value()["regular_cookies"] + "\n";
+    response.body += "\nCookies: " + request.cookies.kv()["regular_cookies"] + "\n";
 
-#ifdef CARAFE_AUTHENTICATED_COOKIES
-    if (!request.cookies.key_value().count("authenticated_cookies")) {
-        response.body += "\nAuthenticated cookie not found!\n";
-    } else {
-        response.body += "\nAuthenticated cookie:" + request.cookies.key_value().at("authenticated_cookies") + "\n";
-        Carafe::AuthenticatedCookies auth(cm, std::chrono::duration_cast<std::chrono::seconds>(std::chrono::hours(24 * 7)));
-        auth.load_data(request.cookies.key_value().at("authenticated_cookies"));
+    if (request.cookies.kv().count("authenticated_cookies")) {
+        response.body += "\nAuthenticated cookie:" + request.cookies.kv().at("authenticated_cookies") + "\n";
+        Carafe::AuthenticatedCookies auth(cm, std::chrono::hours(24 * 7));
+        auth.load_data(request.cookies.kv().at("authenticated_cookies"));
         if (!auth.authenticated()) {
             response.body += "\nAuthenticated cookie contents not valid!\n";
             return;
         }
-        for(auto i : auth.key_value()) { // key_value will be empty if !authenticated().
+        for(auto i : auth.kv()) { // key_value will be empty if !authenticated().
             response.body += i.first + "=" + i.second + "\n";
         }
     }
-#endif
 }
 
 void var(Carafe::Request &request, Carafe::Response &response) {
     response.body = request.vars["var"];
     response.code = 200;
 
-#ifdef CARAFE_AUTHENTICATED_COOKIES
     Carafe::AuthenticatedCookies auth(cm);
-    auth.key_value().emplace("authenticated_key", "authenticated_value");
-    response.cookies.key_value().emplace("authenticated_cookies", auth.serialize());
-#endif
-
-    response.cookies.key_value().emplace("regular_cookies", "yum");
+    auth.kv().emplace("authenticated_key", "authenticated_value");
+    response.cookies.kv().emplace("authenticated_cookies", auth.serialize());
+    response.cookies.kv().emplace("regular_cookies", "yum");
 }
 
 void post(Carafe::Request &request, Carafe::Response &response) {
@@ -63,7 +59,8 @@ int main(int argc, char **argv) {
 
     Carafe::HTTPD httpd(port);
     httpd.debug = true;
-    httpd.add_route("/test", Carafe::HTTPMethods::GET | Carafe::HTTPMethods::HEAD, test);
+    httpd.add_route("/", Carafe::HTTPMethods::GET | Carafe::HTTPMethods::HEAD, hello);
+    httpd.add_route("/headers", Carafe::HTTPMethods::GET | Carafe::HTTPMethods::HEAD, headers);
     httpd.add_route("/var/<var>", Carafe::HTTPMethods::GET, var);
     httpd.add_route("/post", Carafe::HTTPMethods::POST, post);
 

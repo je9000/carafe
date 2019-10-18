@@ -44,8 +44,8 @@ static u32 min(const u32 x, const u32 y) {
 
 static void store64(u64 x, unsigned char *y, size_t offset, size_t y_size)
 {
+    if (offset + 7 >= y_size) throw std::out_of_range("store64");
     for(int i = 0; i != 8; ++i) {
-        if (offset + i >= y_size) throw std::out_of_range("store64");
         y[offset + i] = (x >> ((7-i) * 8)) & 255;
     }
 }
@@ -53,8 +53,8 @@ static void store64(u64 x, unsigned char *y, size_t offset, size_t y_size)
 static u64 load64(const unsigned char *y, size_t offset, size_t y_size)
 {
     u64 res = 0;
+    if (offset + 7 >= y_size) throw std::out_of_range("load64");
     for(int i = 0; i != 8; ++i) {
-        if (offset + i >= y_size) throw std::out_of_range("load64");
         res |= u64(y[offset + i]) << ((7-i) * 8);
     }
     return res;
@@ -422,7 +422,7 @@ void CookiesBase::load_data(const std::string &d) {
                 }
             }
             if (!set_special) {
-                kv[""] = val;
+                cookie_map[""] = val;
             }
         } else {
             while (d[start] == ' ') start++;
@@ -432,23 +432,23 @@ void CookiesBase::load_data(const std::string &d) {
             bool set_special = false;
             if (process_flags_and_special) {
                 if (case_insensitive_equals(key, "path")) {
-                    kv["path"] = val;
+                    cookie_map["path"] = val;
                     set_special = true;
                 } else if (case_insensitive_equals(key, "expires")) {
-                    kv["expires"] = val;
+                    cookie_map["expires"] = val;
                     set_special = true;
                 } else if (case_insensitive_equals(key, "max-age")) {
-                    kv["max-age"] = val;
+                    cookie_map["max-age"] = val;
                     set_special = true;
                 } else if (case_insensitive_equals(key, "domain")) {
-                    kv["domain"] = val;
+                    cookie_map["domain"] = val;
                     set_special = true;
                 }
             }
             if (!set_special) {
                 key = URLSafeCharacters::decode(key);
                 val = URLSafeCharacters::decode(val);
-                if (key.size() || val.size()) kv[key] = val; // key can be "", weird huh?
+                if (key.size() || val.size()) cookie_map[key] = val; // key can be "", weird huh?
             }
         }
         start = end_pos + 1;
@@ -460,17 +460,17 @@ CookiesBase::CookiesBase(const std::string &d) {
     load_data(d);
 }
 
-CookieMap &CookiesBase::CookiesBase::key_value() { return kv; }
+StringMap &CookiesBase::CookiesBase::kv() { return cookie_map; }
 
 void CookiesBase::erase() {
-    kv.erase(kv.begin(), kv.end());
+    cookie_map.erase(cookie_map.begin(), cookie_map.end());
     flag_secure = false;
     flag_httponly = false;
 }
 
 std::string CookiesBase::serialize() {
     std::string s;
-    for(const auto &i : kv) {
+    for(const auto &i : cookie_map) {
         if (!i.first.size() && !i.second.size()) continue;
         s += URLSafeCharacters::encode(i.first);
         s += '=';
@@ -774,7 +774,7 @@ bool AuthenticatedCookies::load_data(const std::string &d) {
     CookiesBase::load_data(data);
 
     // The timestamp is added automatically, if it's not there something went wrong.
-    if (!key_value().count(TIMESTAMP_KEY)) {
+    if (!kv().count(TIMESTAMP_KEY)) {
         erase();
         return false;
     }
@@ -785,7 +785,7 @@ bool AuthenticatedCookies::load_data(const std::string &d) {
         unsigned long long ts, now;
         // Unlikely exception, since we set this value and (hopefully) authenticate it.
         try {
-            ts = std::stoull(key_value()[TIMESTAMP_KEY]);
+            ts = std::stoull(kv()[TIMESTAMP_KEY]);
             now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         } catch (...) {
             erase();
@@ -801,14 +801,14 @@ bool AuthenticatedCookies::load_data(const std::string &d) {
     return true;
 }
 
-CookieMap &AuthenticatedCookies::key_value() { return CookiesBase::kv; }
+StringMap &AuthenticatedCookies::kv() { return CookiesBase::cookie_map; }
 void AuthenticatedCookies::erase() { CookiesBase::erase(); }
 bool AuthenticatedCookies::authenticated() { return auth_valid; }
 
 std::string AuthenticatedCookies::serialize() {
     auto now = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
 
-    CookiesBase::kv[TIMESTAMP_KEY] = std::to_string(now.time_since_epoch().count());
+    CookiesBase::cookie_map[TIMESTAMP_KEY] = std::to_string(now.time_since_epoch().count());
 
     std::string s = Base64::encode(CookiesBase::serialize());
     AuthenticatedCookieAuthenticator mac = cookie_keys.compute(s);
@@ -924,12 +924,12 @@ const std::string &RequestConnectionValues::get(const std::string &key) {
     return f->second;
 }
 
-RequestStringMap::iterator RequestConnectionValues::begin() {
+StringMap::iterator RequestConnectionValues::begin() {
     if (!all_args_populated) load_all();
     return all_args.begin();
 }
 
-RequestStringMap::iterator RequestConnectionValues::end() {
+StringMap::iterator RequestConnectionValues::end() {
     if (!all_args_populated) load_all();
     return all_args.end();
 }
@@ -1099,7 +1099,7 @@ int HTTPD::mhd_handler(void *microhttpd_ptr,
         MHD_add_response_header(mhd_response, h.first.c_str(), h.second.c_str());
     }
 
-    if (response.cookies.key_value().size()) {
+    if (response.cookies.kv().size()) {
         MHD_add_response_header(mhd_response, MHD_HTTP_HEADER_SET_COOKIE, response.cookies.serialize().c_str());
     }
 

@@ -15,7 +15,8 @@ trap err ERR
 
 ../carafe &
 CARAFE_PID=$!
-curl -s 'http://127.0.0.1:8080/test' | grep 'Headers:'
+sleep 1
+curl -s 'http://127.0.0.1:8080/headers' | grep 'Headers:'
 curl -s 'http://127.0.0.1:8080/var/var_here' | grep 'var_here'
 
 echo OK
