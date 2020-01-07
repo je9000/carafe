@@ -639,9 +639,6 @@ bool AuthenticatedCookieAuthenticator::safe_equals(const std::string &b) const {
 }
 
 // CookieKeyManager
-void CookieKeyManager::Spinlock::lock() { while(flag.test_and_set()); }
-void CookieKeyManager::Spinlock::unlock() { flag.clear(); }
-
 CookieKeyManager::CookieKeyManager() {};
 CookieKeyManager::CookieKeyManager(const std::string &key) : encrypt_key(key) {};
 
@@ -655,28 +652,28 @@ CookieKeyManagerID CookieKeyManager::add_decrypt_key_no_lock(const SecureKey &ne
 }
 
 CookieKeyManagerID CookieKeyManager::add_decrypt_key(const SecureKey &new_key) {
-    std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+    std::lock_guard<std::mutex> dlock(decrypt_key_lock);
     return add_decrypt_key_no_lock(new_key);
 }
 
 bool CookieKeyManager::remove_decrypt_key(const CookieKeyManagerID id) {
-    std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+    std::lock_guard<std::mutex> dlock(decrypt_key_lock);
     return decrypt_keys.erase(id);
 }
 
 bool CookieKeyManager::has_decrypt_key(const CookieKeyManagerID id) const {
-    std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+    std::lock_guard<std::mutex> dlock(decrypt_key_lock);
     return decrypt_keys.count(id);
 }
 
 size_t CookieKeyManager::decrypt_key_count() const {
-    std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+    std::lock_guard<std::mutex> dlock(decrypt_key_lock);
     return decrypt_keys.size();
 }
 
 void CookieKeyManager::expire_old_decrypt_keys(const std::chrono::seconds age) {
     auto now = std::chrono::system_clock::now();
-    std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+    std::lock_guard<std::mutex> dlock(decrypt_key_lock);
 
     for (auto it = decrypt_keys.cbegin(); it != decrypt_keys.cend(); ) {
         const auto &ts = it->second.ts;
@@ -689,14 +686,14 @@ void CookieKeyManager::expire_old_decrypt_keys(const std::chrono::seconds age) {
 }
 
 SecureKey CookieKeyManager::get_encrypt_key() const { // Important this returns a copy.
-    std::lock_guard<Spinlock> elock(encrypt_key_lock);
+    std::lock_guard<std::mutex> elock(encrypt_key_lock);
     return encrypt_key;
 }
 
 CookieKeyManagerID CookieKeyManager::set_encrypt_key(const std::string &new_key) {
     // Order is important
-    std::lock_guard<Spinlock> elock(encrypt_key_lock);
-    std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+    std::lock_guard<std::mutex> elock(encrypt_key_lock);
+    std::lock_guard<std::mutex> dlock(decrypt_key_lock);
 
     auto r = add_decrypt_key_no_lock(encrypt_key);
     encrypt_key.rekey(new_key);
@@ -705,8 +702,8 @@ CookieKeyManagerID CookieKeyManager::set_encrypt_key(const std::string &new_key)
 
 CookieKeyManagerID CookieKeyManager::generate_new_encrypt_key() {
     // Order is important
-    std::lock_guard<Spinlock> elock(encrypt_key_lock);
-    std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+    std::lock_guard<std::mutex> elock(encrypt_key_lock);
+    std::lock_guard<std::mutex> dlock(decrypt_key_lock);
 
     auto r = add_decrypt_key_no_lock(encrypt_key);
     encrypt_key.rekey();
@@ -714,7 +711,7 @@ CookieKeyManagerID CookieKeyManager::generate_new_encrypt_key() {
 }
 
 AuthenticatedCookieAuthenticator CookieKeyManager::compute(const std::string &data) const {
-    std::lock_guard<Spinlock> elock(encrypt_key_lock);
+    std::lock_guard<std::mutex> elock(encrypt_key_lock);
     AuthenticatedCookieAuthenticator authenticator(encrypt_key);
     authenticator.compute_from_string(data);
     return authenticator;
@@ -722,14 +719,15 @@ AuthenticatedCookieAuthenticator CookieKeyManager::compute(const std::string &da
 
 // CookieKeyManager
 bool CookieKeyManager::check_valid(const std::string &data, const std::string &check_me) const {
+    // Order is important
     {
-        std::lock_guard<Spinlock> elock(encrypt_key_lock);
+        std::lock_guard<std::mutex> elock(encrypt_key_lock);
         AuthenticatedCookieAuthenticator authenticator(encrypt_key);
         authenticator.compute_from_string(data);
         if (authenticator.safe_equals(check_me)) return true;
     }
 
-    std::lock_guard<Spinlock> dlock(decrypt_key_lock);
+    std::lock_guard<std::mutex> dlock(decrypt_key_lock);
     for(const auto &key : decrypt_keys) {
         AuthenticatedCookieAuthenticator authenticator(key.second.key);
         authenticator.compute_from_string(data);

@@ -201,22 +201,16 @@ class CookieKeyManager {
 private:
     SecureKey encrypt_key;
     std::unordered_map<CookieKeyManagerID, CookieSecretKeyAndTime> decrypt_keys;
-    class Spinlock { // Only to be used with lock_guard.
-        std::atomic_flag flag = ATOMIC_FLAG_INIT;
-    public:
-        void lock();
-        void unlock();
-    };
 
-    mutable Spinlock encrypt_key_lock, decrypt_key_lock;
+    mutable std::mutex encrypt_key_lock, decrypt_key_lock;
 
     CookieKeyManagerID add_decrypt_key_no_lock(const SecureKey &);
 public:
     CookieKeyManager();
     CookieKeyManager(const std::string &key);
 
-    // Don't want to copy the Spinlock, so just disable all copies. Shouldn't
-    // be necessary anyway.
+    // Don't want to copy the lock, so just disable all copies. Shouldn't be
+    // necessary anyway.
     CookieKeyManager(const CookieKeyManager &) = delete;
 
     CookieKeyManagerID add_decrypt_key(const SecureKey &);
