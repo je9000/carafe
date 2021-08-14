@@ -396,8 +396,6 @@ private:
                                  uint64_t,
                                  size_t);
 
-    void sort_routes();
-
 public:
     size_t max_upload_size, max_header_size;
     std::atomic_bool keep_running; // We could be running in multiple threads via microhttpd

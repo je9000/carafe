@@ -1162,23 +1162,12 @@ int HTTPD::mhd_post_iterator(void *microhttpd_req_ptr,
     return MHD_YES;
 }
 
-void HTTPD::sort_routes() {
-    struct {
-        bool operator()(RouteCallbackInfo &a, RouteCallbackInfo &b) const {
-            return a.route_re.size() < b.route_re.size();
-        }
-    } sorter;
-    std::sort(routes.begin(), routes.end(), sorter);
-}
-
 HTTPD::~HTTPD() noexcept {
     MHD_stop_daemon(daemon);
     if (dual_stack) MHD_stop_daemon(daemon6);
 }
 
 void HTTPD::run() {
-    sort_routes();
-
     struct MHD_OptionItem ops[] = {
         { MHD_OPTION_CONNECTION_TIMEOUT, timeout, NULL },
         { MHD_OPTION_LISTENING_ADDRESS_REUSE, 1, NULL },
