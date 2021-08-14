@@ -13,6 +13,7 @@
 
 #ifdef CARAFE_AUTHENTICATED_COOKIES
 #include <atomic>
+#include <mutex>
 #endif
 
 #include <microhttpd.h>

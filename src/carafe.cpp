@@ -1,9 +1,5 @@
 #include "carafe.hpp"
 
-#ifdef CARAFE_AUTHENTICATED_COOKIES
-#include <mutex>
-#endif
-
 #if defined(HAVE_GETRANDOM)
 #include <sys/random.h>
 #elif defined(_MSC_VER)
