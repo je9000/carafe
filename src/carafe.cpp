@@ -1252,7 +1252,7 @@ void HTTPD::handle_route(Request &request, Response &response, const char *metho
     std::smatch arg_matches;
     HTTPMethod method_int = Request::method_to_int(method);
     for(auto &route : routes) {
-        if (std::regex_match(request.path, arg_matches, route.re) && (method_int & route.allowed_methods)) {
+        if ((method_int & route.allowed_methods) && std::regex_match(request.path, arg_matches, route.re)) {
             for(size_t i = 1 /* 0 is the whole string */; i < arg_matches.size(); i++) {
                 request.vars[route.arg_names.at(i - 1)] = arg_matches[i].str();
             }
